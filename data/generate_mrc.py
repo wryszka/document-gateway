@@ -39,8 +39,13 @@ class SimplePDF:
             f"BT /F1 {size} Tf 50 {self._y:.0f} Td ({self._escape(text)}) Tj ET")
         self._y -= 4
 
-    def add_text(self, text, size=10):
-        for line in text.split("\n"):
+    def add_text(self, text, size=10, width=96):
+        import textwrap
+        lines = []
+        for raw in text.split("\n"):
+            wrapped = textwrap.wrap(raw, width=width, subsequent_indent="    ") if raw else [""]
+            lines.extend(wrapped or [""])
+        for line in lines:
             if self._y < 50:
                 self._new_page()
             self._y -= size + 4
@@ -126,7 +131,7 @@ POLICIES = [
                     "LMA5401 - Property Cyber and Data Exclusion"],
      "exclusions": ["War and terrorism (NMA2918)", "Nuclear, chemical, biological and radiological contamination",
                     "Gradual pollution"],
-     "law": "This contract shall be governed by the law of England and Wales and subject to the exclusive jurisdiction of the courts of England and Wales.",
+     "law": "English law; courts of England and Wales (exclusive)",
      "security": [("33", "Hiscox Syndicates Ltd", 40.0), ("623", "Beazley Furlonge Ltd", 35.0),
                   ("2987", "Brit Syndicates Ltd", 25.0), ("2001", "MS Amlin Underwriting Ltd", 25.0)],
      "country": "United Kingdom", "brokerage": "15.00%"},
@@ -142,7 +147,7 @@ POLICIES = [
      "conditions": ["LMA5401 - Claims Made Notification Clause", "IUA09-045 - Dishonesty Exclusion"],
      "exclusions": ["Bodily injury and property damage", "Prior and pending litigation",
                     "Fraud or dishonesty of the insured"],
-     "law": "This contract shall be governed by the law of England and Wales and subject to the exclusive jurisdiction of the courts of England and Wales.",
+     "law": "English law; courts of England and Wales (exclusive)",
      "security": [("510", "Tokio Marine Kiln Syndicates Ltd", 45.0), ("3000", "Markel Syndicate Management Ltd", 40.0),
                   ("1414", "Ascot Underwriting Ltd", 40.0)],
      "country": "United Kingdom", "brokerage": "17.50%"},
@@ -158,7 +163,7 @@ POLICIES = [
      "conditions": ["Institute Cargo Clauses (A) CL382", "Institute War Clauses (Cargo) CL385",
                     "LMA5218 - Sanction Limitation and Exclusion Clause"],
      "exclusions": ["Delay and loss of market", "Inherent vice", "Insufficiency of packing"],
-     "law": "This contract shall be governed by the law of England and Wales and subject to the exclusive jurisdiction of the courts of England and Wales.",
+     "law": "English law; courts of England and Wales (exclusive)",
      "security": [("1084", "Chaucer Syndicates Ltd", 50.0), ("2003", "AXA XL Underwriting Agencies Ltd", 40.0),
                   ("1886", "QBE Underwriting Ltd", 35.0)],
      "country": "Switzerland", "brokerage": "12.50%"},
@@ -173,7 +178,7 @@ POLICIES = [
      "premium": "USD 1,250,000 annual, flat",
      "conditions": ["LMA5218 - Sanction Limitation and Exclusion Clause", "LMA5567 - Cyber War and Cyber Operation Exclusion"],
      "exclusions": ["Infrastructure failure", "Prior known circumstances", "Bodily injury"],
-     "law": "This contract shall be governed by the law of the State of New York and subject to the jurisdiction of the courts of New York.",
+     "law": "New York law; courts of the State of New York",
      "security": [("623", "Beazley Furlonge Ltd", 30.0), ("4444", "Canopius Managing Agents Ltd", 25.0),
                   ("457", "Munich Re Syndicate Ltd", 22.5), ("1969", "Apollo Syndicate Management Ltd", 20.0)],
      "country": "United States of America", "brokerage": "15.00%"},
@@ -189,7 +194,7 @@ POLICIES = [
      "premium": "GBP 2,100,000 annual, minimum and deposit",
      "conditions": ["LMA5218 - Sanction Limitation and Exclusion Clause", "Insured vs Insured Exclusion (with carve-backs)"],
      "exclusions": ["Bodily injury and property damage", "Pollution", "Prior and pending litigation"],
-     "law": "This contract shall be governed by the law of England and Wales and subject to the exclusive jurisdiction of the courts of England and Wales.",
+     "law": "English law; courts of England and Wales (exclusive)",
      "security": [("2003", "AXA XL Underwriting Agencies Ltd", 50.0), ("2010", "Lancashire Syndicates Ltd", 40.0),
                   ("2001", "MS Amlin Underwriting Ltd", 35.0)],
      "country": "United Kingdom", "brokerage": "10.00%"},
@@ -300,7 +305,25 @@ def generate_nonconforming(out_dir):
     return "cover_note_unstructured.pdf"
 
 
+def _field_lines(policy):
+    """Every 'Label: value' line the parser reads as a field. Each must fit on one PDF
+    line (no wrap), or the parser would only see the first part of the value."""
+    lines = [f"Broker: {policy['broker']['name']}", f"Type: {policy['type']}",
+             f"Insured: {policy['insured']['name']}", f"Situation: {policy['situation']}",
+             f"Deductible: {policy['deductible']}", f"Premium: {policy['premium']}",
+             f"Choice of Law and Jurisdiction: {policy['law']}",
+             f"Country of Origin: {policy['country']}"]
+    lines += [f"- {x}" for x in policy["limits"] + policy["conditions"] + policy["exclusions"]]
+    lines += [f"Syndicate {n} ({a}) | Written Line: {w:.2f}% | Signed Line: {w:.2f}%" for n, a, w in policy["security"]]
+    lines += [f"Slip Leader: Syndicate {policy['security'][0][0]} ({policy['security'][0][1]})"]
+    return lines
+
+
 def generate():
+    for p in POLICIES:
+        too_long = [l for l in _field_lines(p) if len(l) > 96]
+        if too_long:
+            raise ValueError(f"{p['filename']}: field line would wrap and be cut when parsed: {too_long[0]!r}")
     os.makedirs(OUT, exist_ok=True)
     names = []
     for p in POLICIES:

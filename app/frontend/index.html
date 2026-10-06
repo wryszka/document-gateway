@@ -288,8 +288,7 @@
           <td>${pt.cdr ? escapeHtml(pt.cdr) : '<span style="color:var(--mut)">— (wording only)</span>'}</td>
           <td>${escapeHtml(pt.section)}</td>
           <td><span class="chip ${pt.status === 'identified' ? 'active' : 'quarantined'}">${pt.status === 'identified' ? 'identified' : 'not found'}</span></td>
-          <td>${escapeHtml(pt.value || '—')}${pt.source_quote ? `<div style="font-size:11px;color:var(--mut);margin-top:3px">“${escapeHtml(pt.source_quote)}”</div>` : ''}</td>
-          <td class="num">${pt.confidence ? (pt.confidence * 100).toFixed(0) + '%' : '—'}</td></tr>`).join('');
+          <td>${escapeHtml(pt.value || '—')}${pt.source_quote ? `<div style="font-size:11px;color:var(--mut);margin-top:3px">“${escapeHtml(pt.source_quote)}”</div>` : ''}</td></tr>`).join('');
         return `
           <details class="details-summary" open><summary>What am I seeing?</summary>
             <div class="body">These are the ACORD data points we expect from an MRC. Extraction identifies all or some of them. When you confirm, the schema is recorded in the repository — and every matching contract after this flows straight through.</div>
@@ -300,8 +299,9 @@
             <div><div class="lbl">Conforms to MRC structure</div><div class="big ${p.conforming ? 'pos' : 'neg'}">${p.conforming ? 'Yes' : 'No'}</div></div>
           </div>
           <div class="card"><h2 style="margin-top:0">Expected ACORD data points</h2>
-            <table><thead><tr><th>Data point</th><th>ACORD binding</th><th>Core Data Record field (indicative)</th><th>MRC section</th><th>Status</th><th>Value · source line</th><th class="num">Conf.</th></tr></thead>
+            <table><thead><tr><th>Data point</th><th>ACORD term</th><th>CDR field*</th><th>MRC section</th><th>Status</th><th style="min-width:240px">Value · source line</th></tr></thead>
             <tbody>${rows}</tbody></table>
+            <div style="font-size:11px;color:var(--mut);margin-top:8px">* Indicative Lloyd's Core Data Record field — a paraphrased crosswalk for discussion, not the published specification. Values are read by MRC section and field label; the source line is shown for each.</div>
             <div style="margin-top:16px;display:flex;align-items:center;gap:12px">
               <button class="act" id="mrcConfirmBtn">Confirm &amp; register schema</button>
               <span style="color:var(--mut);font-size:12px">Records "Lloyd's MRC (ACORD)" in the schema repository; the other contracts are then recognised and ingested automatically — watch them flip in the Inbox.</span>
@@ -467,17 +467,14 @@
         const qs = new URLSearchParams((window.location.hash.split('?')[1]) || '');
         const sel = qs.get('m') || list[0].mrc_id;
         const d = await fetchJSON('/api/mrc/lineage?mrc_id=' + encodeURIComponent(sel));
-        const opts = list.map(x => `<option value="${escapeAttr(x.mrc_id)}" ${x.mrc_id === sel ? 'selected' : ''}>${escapeHtml(x.insured_name)} — ${escapeHtml(x.class_of_business)}</option>`).join('');
+        const picks = list.map(x => `<a class="${x.mrc_id === sel ? 'act' : 'ghost'}" style="display:inline-block;text-decoration:none;padding:7px 12px;border-radius:8px;margin:3px" href="#mrc_lineage?m=${encodeURIComponent(x.mrc_id)}">${escapeHtml(x.class_of_business)} · ${escapeHtml(x.insured_name)}</a>`).join('');
         const rows = d.points.map(x => `<tr>
           <td style="font-weight:600">${escapeHtml(x.label)}</td>
           <td>${escapeHtml(x.value || '—')}</td>
           <td>${escapeHtml(x.section)}</td>
           <td style="font-size:12px;color:var(--slate2)">${x.source_quote ? '“' + escapeHtml(x.source_quote) + '”' : '<span style="color:var(--mut)">not found in the contract</span>'}</td>
           <td><code style="font-size:11px">${escapeHtml(x.acord_binding)}</code></td></tr>`).join('');
-        return explain + `<div class="card" style="display:flex;gap:12px;align-items:center">
-            <label for="mrcLinSel" style="font-weight:600">Contract</label>
-            <select id="mrcLinSel" aria-label="Choose a contract" style="flex:1;padding:8px;border:1px solid var(--line2);border-radius:8px">${opts}</select>
-          </div>
+        return explain + `<div class="card"><div style="font-weight:600;margin-bottom:6px">Choose a contract</div>${picks}</div>
           <div class="strip">
             <div><div class="lbl">Source document</div><div class="big brand" style="font-size:18px">${escapeHtml(d.contract.file_name)}</div></div>
             <div><div class="lbl">UMR</div><div class="big" style="font-size:18px">${escapeHtml(d.contract.umr)}</div></div>
@@ -486,12 +483,7 @@
           <div class="card"><h2 style="margin-top:0">Every value, and the line it came from</h2>
             <table><thead><tr><th>Data point</th><th>Value</th><th>MRC section</th><th>Source line in the contract</th><th>ACORD term</th></tr></thead>
             <tbody>${rows}</tbody></table>
-            <div style="margin-top:10px;font-size:12px"><a href="${escapeAttr(d.download)}" target="_blank" rel="noopener">Open the original PDF in the governed volume ↗</a></div></div>
-          <script>
-            document.getElementById('mrcLinSel').addEventListener('change', function(){
-              window.location.hash = '#mrc_lineage?m=' + encodeURIComponent(this.value);
-            });
-          <\/script>`;
+            <div style="margin-top:10px;font-size:12px"><a href="${escapeAttr(d.download)}" target="_blank" rel="noopener">Open the original PDF in the governed volume ↗</a></div></div>`;
       },
 
       'mrc_audit': async function() {
@@ -616,6 +608,8 @@
             <div id="mrcAskResult" style="margin-top:14px"></div>
           </div>
           <script>
+            document.getElementById('mrcAskInput').addEventListener('focus', function(){ this.select(); });
+            document.getElementById('mrcAskInput').addEventListener('keydown', function(ev){ if(ev.key === 'Enter'){ document.getElementById('mrcAskBtn').click(); } });
             document.getElementById('mrcAskBtn').addEventListener('click', async function(){
               var q = document.getElementById('mrcAskInput').value.trim();
               if(!q){ return; }

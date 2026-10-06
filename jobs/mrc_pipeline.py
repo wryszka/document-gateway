@@ -273,6 +273,9 @@ def stage(cfg, path):
     No schema needed to stage — this classifies by structure only."""
     F = cfg["full_schema"]
     fname = os.path.basename(path)
+    if sql(f"SELECT 1 FROM {F}.source_document WHERE tenant='mrc' AND stored_path=:sp LIMIT 1",
+           params={"sp": path}, cfg=cfg):
+        return {"doc_id": None, "file": fname, "state": "already tracked"}
     doc_id = f"DOC-{uuid.uuid4().hex[:12]}"
     rec = recognise(cfg, path)
     if rec["conforming"]:
@@ -280,8 +283,11 @@ def stage(cfg, path):
     else:
         status, state, reason = "quarantined", "unrecognised", \
             "does not match the MRC structure — needs review (HITL)"
-    sql(f"""INSERT INTO {F}.source_document VALUES
-            (:d,'mrc',:c,'mrc',:fn,:sp,:st,:ins,NULL,'v1',:rd,:rp,current_timestamp(),NULL,NULL)""",
+    # Idempotent: a document already tracked (same stored path) is never staged twice, even
+    # if two staging passes overlap.
+    sql(f"""INSERT INTO {F}.source_document
+            SELECT :d,'mrc',:c,'mrc',:fn,:sp,:st,:ins,NULL,'v1',:rd,:rp,current_timestamp(),NULL,NULL
+            WHERE NOT EXISTS (SELECT 1 FROM {F}.source_document WHERE tenant='mrc' AND stored_path=:sp)""",
         params={"d": doc_id, "c": rec["det"].get("broker_name") or "MRC counterparty",
                 "fn": fname, "sp": path, "st": status, "ins": state,
                 "rd": json.dumps({"reason": reason, "core_found": rec["core_found"],

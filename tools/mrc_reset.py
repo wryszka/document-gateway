@@ -19,17 +19,30 @@ MRC_TABLES = [("template", "doc_family='mrc'"), ("source_document", "tenant='mrc
               ("graph_nodes", "tenant='mrc'"), ("graph_edges", "tenant='mrc'")]
 
 
+def _sql_retry(stmt, cfg):
+    """A DELETE can report a conflict with its own committed retry; one more try is safe
+    because every statement here is idempotent."""
+    import time
+    for attempt in range(3):
+        try:
+            return sql(stmt, cfg=cfg)
+        except RuntimeError as e:
+            if "CONCURRENT" not in str(e) or attempt == 2:
+                raise
+            time.sleep(3)
+
+
 def reset(cfg, regenerate=True):
     from data import generate_mrc
     from jobs import mrc_pipeline
     F = cfg["full_schema"]
     # Return the governance trail to origin too, so the Audit screen starts clean (the reset
     # is the one sanctioned exception to append-only — it rebuilds the demo, not real history).
-    sql(f"""DELETE FROM {F}.audit_event WHERE entity_id IN (SELECT doc_id FROM {F}.source_document WHERE tenant='mrc')
-            OR entity_type = 'mrc_entities' OR (entity_type = 'template' AND entity_id LIKE '%/mrc')""", cfg=cfg)
-    sql(f"DELETE FROM {F}.decision WHERE tenant='mrc'", cfg=cfg)
+    _sql_retry(f"""DELETE FROM {F}.audit_event WHERE entity_id IN (SELECT doc_id FROM {F}.source_document WHERE tenant='mrc')
+            OR entity_type = 'mrc_entities' OR (entity_type = 'template' AND entity_id LIKE '%/mrc')""", cfg)
+    _sql_retry(f"DELETE FROM {F}.decision WHERE tenant='mrc'", cfg)
     for t, w in MRC_TABLES:
-        sql(f"DELETE FROM {F}.{t} WHERE {w}", cfg=cfg)
+        _sql_retry(f"DELETE FROM {F}.{t} WHERE {w}", cfg)
     if regenerate:
         generate_mrc.upload(cfg, generate_mrc.generate())
     mrc_pipeline.process_mrc_inbox(cfg)
