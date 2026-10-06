@@ -1,0 +1,44 @@
+{
+  "_comment": "Document Gateway \u2014 single-edit config. Point `catalog` at your workspace catalog and run the orchestrator. gen1 self-contained: every object lives in `${catalog}.${schema}`. Conforms to the bricksurance-data-core exchange/reference contract so gen2 migration is a delta, not a rewrite (see docs/GEN2_MIGRATION_DELTA.md).",
+  "catalog": "lr_dev_aws_us_catalog",
+  "schema": "document_gateway",
+  "databricks_profile": "DEV",
+  "warehouse_id": "a3b61648ea4809e3",
+  "volume": "landing",
+  "app_name": "document-gateway",
+  "as_of": "auto",
+  "seed": 20260828,
+  "models": {
+    "parse": "ai_parse_document",
+    "extract": "databricks-claude-sonnet-4-5",
+    "narrate": "databricks-claude-sonnet-4-5",
+    "eval_challenger": "databricks-meta-llama-3-3-70b-instruct"
+  },
+  "genie": {
+    "space_id": "01f1a2e2a71c1737bea0a28c04befc71",
+    "_comment": "Ask the Gateway \u2014 created programmatically over graph + projections (never hand-built). App SP needs CAN_RUN on the space.",
+    "mrc_space_id": "01f1ad1839361bc99438c371123a316e",
+    "mrc_ka_endpoint": "ka-7d67545f-endpoint",
+    "mrc_ka_id": "7d67545f-9592-4422-8f66-9144bb979861"
+  },
+  "tenants": {
+    "bordereaux": {
+      "enabled": true,
+      "label": "Bordereaux",
+      "config": "tenants/bordereaux/tenant.json",
+      "_note": "Hero tenant \u2014 delegated-authority premium & claims bordereaux. Built fully."
+    },
+    "health_slip": {
+      "enabled": true,
+      "label": "Health renewal slip",
+      "config": "tenants/health_slip/tenant.json",
+      "_note": "Config-only port of the HB exhibit family \u2014 proves 'the whole ingestion front-end is one config file'."
+    },
+    "mrc": {
+      "enabled": true,
+      "label": "Market Reform Contract",
+      "config": "tenants/mrc/tenant.json",
+      "_note": "Prose deterministic path (MRC heading anchors) + AI graph extraction + dual-retrieval ask-surface (KA + Genie)."
+    }
+  }
+}

@@ -1,0 +1,69 @@
+# Document Gateway — Databricks Asset Bundle (DAB).
+#   Counterparty document -> governed, decision-grade data. gen1 self-contained:
+#   every object lives in ${var.catalog}.${var.schema}.
+#
+# One-command deploy:  databricks bundle deploy -t dev   (then: python tools/orchestrate.py)
+# The orchestrator (tools/orchestrate.py) reads config.json and runs the end-to-end
+# build (schema -> dictionary -> synthetic docs -> extraction -> projections -> agents -> app).
+#
+# --------------------------------------------------------------------------
+# CATALOG / SCHEMA
+#   `catalog` is EMPTY by default for portability — the Phase-0 setup notebook
+#   auto-resolves to the workspace current catalog (spark.catalog.currentCatalog()).
+#   Pipelines need it set, so each target pins it. Override on the CLI with
+#   --var="catalog=my_catalog" for a fresh workspace.
+# --------------------------------------------------------------------------
+
+bundle:
+  name: document_gateway
+
+include:
+  - resources/*.yml
+
+sync:
+  exclude:
+    - "app/frontend/node_modules"
+    - "**/__pycache__"
+    - ".venv"
+    - "output"
+    - "state.json"
+
+variables:
+  catalog:
+    description: >-
+      Unity Catalog to deploy into. Empty = Phase-0 notebook auto-resolves to the
+      workspace current catalog. Pipelines need it set — each target pins it below.
+    default: ""
+  schema:
+    description: Fixed schema for all Document Gateway objects (gen1 self-contained).
+    default: document_gateway
+  warehouse_id:
+    description: SQL warehouse the app + notebooks run statements on (workspace-specific).
+    default: ""
+
+targets:
+  # DEV = the gen1 home (fevm-lr-dev-aws-us). Where this demo is built and shown.
+  dev:
+    mode: development
+    default: true
+    workspace:
+      host: https://fevm-lr-dev-aws-us.cloud.databricks.com
+      profile: DEV
+    variables:
+      catalog: lr_dev_aws_us_catalog
+      schema: document_gateway
+      warehouse_id: a3b61648ea4809e3
+
+  # PROD stub = serverless workspace (the future gen2 base). NOT deployed here; left
+  # so the bundle is workspace-agnostic when the demo migrates to the shared spine.
+  # See docs/GEN2_MIGRATION_DELTA.md for what changes at migration.
+  prod:
+    mode: production
+    workspace:
+      host: https://fevm-lr-serverless-aws-us.cloud.databricks.com
+      profile: DEFAULT
+      root_path: /Workspace/Shared/.bundle/${bundle.name}/${bundle.target}
+    variables:
+      catalog: lr_serverless_aws_us_catalog
+      schema: document_gateway
+      warehouse_id: ab79eced8207d29b

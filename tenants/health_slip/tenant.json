@@ -1,0 +1,61 @@
+{
+  "_comment": "Health renewal-slip tenant — a CONFIG-ONLY port of the HB exhibit family. Onboarding this whole document family added NO family-specific pipeline code: the base engine reads this file. `lander: generic` routes to the config-driven generic lander; the projection's `columns` map logical fields to the renewal_inputs table. This IS the 'the entire HB ingestion front-end is now one config file' payoff.",
+
+  "tenant": "health_slip",
+  "label": "Health renewal slip",
+  "subtitle": "Employer medical · renewal exhibit",
+
+  "families": {
+    "renewal_slip": {
+      "kind": "tabular",
+      "file_token": "renewalslip",
+      "fields": "renewal",
+      "lander": "generic",
+      "node_label": "RenewalExhibit",
+      "projection": "renewal_inputs"
+    }
+  },
+
+  "logical_fields": {
+    "renewal": ["group_name", "member_months", "total_incurred_claims", "annual_trend",
+                "months_of_trend", "demographic_adjustment", "target_loss_ratio",
+                "manual_rating_pool_increase"]
+  },
+
+  "layouts": {
+    "exhibit_a": {
+      "group_name": "Employer Group", "member_months": "Member Months",
+      "total_incurred_claims": "Total Incurred Claims", "annual_trend": "Annual Trend",
+      "months_of_trend": "Months of Trend", "demographic_adjustment": "Demographic Adjustment",
+      "target_loss_ratio": "Target Loss Ratio", "manual_rating_pool_increase": "Manual Rating Pool Increase"
+    }
+  },
+
+  "projections": {
+    "renewal_inputs": {
+      "table": "renewal_inputs",
+      "_comment": "The generic lander reads this: one projection row per exhibit row, each column sourced from a logical field or a special token (__node_id / __doc_id / __period / __party).",
+      "columns": [
+        {"col": "renewal_input_id", "from": "__node_id", "type": "str"},
+        {"col": "group_name", "from": "group_name", "type": "str"},
+        {"col": "member_months", "from": "member_months", "type": "dec"},
+        {"col": "total_incurred_claims", "from": "total_incurred_claims", "type": "dec"},
+        {"col": "annual_trend", "from": "annual_trend", "type": "float"},
+        {"col": "months_of_trend", "from": "months_of_trend", "type": "float"},
+        {"col": "demographic_adjustment", "from": "demographic_adjustment", "type": "float"},
+        {"col": "target_loss_ratio", "from": "target_loss_ratio", "type": "float"},
+        {"col": "manual_rating_pool_increase", "from": "manual_rating_pool_increase", "type": "float"},
+        {"col": "carrier_name", "from": "__party", "type": "str"},
+        {"col": "reporting_period", "from": "__period", "type": "str"},
+        {"col": "source_document_id", "from": "__doc_id", "type": "str"}
+      ]
+    }
+  },
+
+  "carrier": {"name": "Summit Health Administrators", "reference": "HC-01", "layout": "exhibit_a", "period": "2027-01"},
+  "groups": [
+    {"group_name": "Riverside School District", "member_months": 10200, "total_incurred_claims": 1450000, "annual_trend": 0.075, "months_of_trend": 18, "demographic_adjustment": 1.02, "target_loss_ratio": 0.85, "manual_rating_pool_increase": 0.03},
+    {"group_name": "Meadowlark Manufacturing", "member_months": 6400, "total_incurred_claims": 980000, "annual_trend": 0.082, "months_of_trend": 15, "demographic_adjustment": 0.98, "target_loss_ratio": 0.83, "manual_rating_pool_increase": 0.025},
+    {"group_name": "Coastal Health Partners", "member_months": 8800, "total_incurred_claims": 1210000, "annual_trend": 0.069, "months_of_trend": 12, "demographic_adjustment": 1.05, "target_loss_ratio": 0.86, "manual_rating_pool_increase": 0.028}
+  ]
+}

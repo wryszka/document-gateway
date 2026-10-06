@@ -1,0 +1,76 @@
+{
+  "_comment": "Bordereaux tenant config. The tenant is CONFIG, not code — it declares document families, dictionary extensions, layouts (deterministic anchors), templates, and typed projections. The base engine (extraction, reconciliation, graph capture, trust loop) is tenant-agnostic and reads this. Months are DERIVED from as_of at generation time so a reset rolls the book to today (Principle 11).",
+
+  "tenant": "bordereaux",
+  "label": "Bordereaux",
+  "subtitle": "Delegated authority · premium & claims",
+
+  "families": {
+    "premium_bordereau": {"kind": "tabular", "file_token": "premium", "fields": "premium", "lander": "premium", "projection": "premium_rows", "node_label": "PremiumBordereauLine"},
+    "claims_bordereau": {"kind": "tabular", "file_token": "claims", "fields": "claims", "lander": "claims", "projection": "claims_rows", "node_label": "ClaimBordereauLine"}
+  },
+
+  "dictionary_extensions": {
+    "_comment": "Entity types / attributes / allowed relations added to the shared dictionary for this tenant.",
+    "entities": {
+      "Coverholder": {"description": "A delegated-authority agent (MGA/broker) authorised to bind and administer business on the carrier's behalf, and to report it via bordereaux.", "attributes": ["name", "coverholder_reference", "binder_reference", "country_code"]},
+      "PremiumBordereauLine": {"description": "One reported premium line on a monthly premium bordereau.", "attributes": ["policy_number", "insured_name", "line_of_business", "inception_date", "expiry_date", "currency", "gross_premium", "commission_amount", "risk_country", "risk_postcode", "reporting_month"]},
+      "ClaimBordereauLine": {"description": "One reported claim line on a monthly claims bordereau.", "attributes": ["claim_reference", "policy_number", "loss_date", "paid_amount", "outstanding_amount", "cause_of_loss", "currency", "reporting_month"]},
+      "ReportingPeriod": {"description": "The calendar month a bordereau reports on (completeness is measured over these).", "attributes": ["reporting_month"]}
+    },
+    "relationships": {
+      "SUBMITTED_BY": {"source": "PremiumBordereauLine", "target": "Coverholder", "description": "The coverholder that reported the premium line."},
+      "REPORTS_POLICY": {"source": "PremiumBordereauLine", "target": "Policy", "description": "The policy the premium line reports on."},
+      "FOR_PERIOD": {"source": "PremiumBordereauLine", "target": "ReportingPeriod", "description": "The reporting month the line belongs to."},
+      "CLAIM_SUBMITTED_BY": {"source": "ClaimBordereauLine", "target": "Coverholder", "description": "The coverholder that reported the claim line."},
+      "CLAIM_ON_POLICY": {"source": "ClaimBordereauLine", "target": "Policy", "description": "The policy the claim reports against."}
+    }
+  },
+
+  "logical_fields": {
+    "premium": ["policy_number", "insured_name", "line_of_business", "inception_date", "expiry_date", "currency", "gross_premium", "commission_amount", "risk_country", "risk_postcode"],
+    "claims": ["claim_reference", "policy_number", "loss_date", "paid_amount", "outstanding_amount", "cause_of_loss", "currency"]
+  },
+
+  "layouts": {
+    "_comment": "logical_field -> the exact header label this layout uses. Premium and claims layouts.",
+    "layout_a": {"policy_number": "Policy No", "insured_name": "Insured", "line_of_business": "Class", "inception_date": "Inception", "expiry_date": "Expiry", "currency": "Ccy", "gross_premium": "Gross Premium", "commission_amount": "Commission", "risk_country": "Country", "risk_postcode": "Postcode"},
+    "layout_a_drift": {"policy_number": "Policy No", "insured_name": "Insured", "line_of_business": "Class", "inception_date": "Inception", "expiry_date": "Expiry", "currency": "Ccy", "gross_premium": "GWP", "commission_amount": "Brokerage", "risk_country": "Country", "risk_postcode": "Postcode"},
+    "layout_b": {"policy_number": "Policy Reference", "insured_name": "Name of Insured", "line_of_business": "Line of Business", "inception_date": "Risk Inception", "expiry_date": "Risk Expiry", "currency": "Currency", "gross_premium": "Premium (GBP)", "commission_amount": "Commission Amt", "risk_country": "Risk Country", "risk_postcode": "Risk Post Code"},
+    "layout_c": {"policy_number": "Cert Number", "insured_name": "Assured", "line_of_business": "Cover", "inception_date": "Start", "expiry_date": "End", "currency": "Cur", "gross_premium": "Written Premium", "commission_amount": "Comm", "risk_country": "Territory", "risk_postcode": "Zip"},
+    "claims_a": {"claim_reference": "Claim Ref", "policy_number": "Policy No", "loss_date": "Date of Loss", "paid_amount": "Paid", "outstanding_amount": "Outstanding", "cause_of_loss": "Cause", "currency": "Ccy"},
+    "claims_b": {"claim_reference": "Claim Reference", "policy_number": "Policy Reference", "loss_date": "Loss Date", "paid_amount": "Paid to Date", "outstanding_amount": "Reserve", "cause_of_loss": "Peril", "currency": "Currency"},
+    "claims_c": {"claim_reference": "Claim No", "policy_number": "Cert Number", "loss_date": "DOL", "paid_amount": "Paid Amt", "outstanding_amount": "O/S", "cause_of_loss": "Loss Type", "currency": "Cur"}
+  },
+
+  "projections": {
+    "premium_rows": {
+      "table": "premium_bordereau_line",
+      "target_contract": "bricksurance_exchange.premium_bordereau_line",
+      "source_system_code": "COVERHOLDER_BDX"
+    },
+    "claims_rows": {
+      "table": "claim_bordereau_line",
+      "target_contract": "bricksurance_delegated_authority.bordereau_claim_row",
+      "source_system_code": "COVERHOLDER_BDX"
+    },
+    "completeness": {
+      "_comment": "Per-coverholder expected-vs-received periods — the 'who hasn't reported' tile. Derived view v_completeness.",
+      "grain": "coverholder_name x reporting_month x doc_family"
+    }
+  },
+
+  "coverholders": {
+    "_comment": "Synthetic delegated-authority world (invented names). Months derived from as_of at generation: established report the last `report_months` complete months (premium + claims); the new coverholder reports only the latest; Ridgeway's LATEST premium drifts a column; Harbourline's MIDDLE premium is resubmitted (restated). One unusable image-only PDF drop.",
+    "report_months": 3,
+    "lines_per_drop": 12,
+    "claims_per_drop": 5,
+    "roster": [
+      {"name": "Harbourline Underwriting", "coverholder_reference": "CH-8801", "binder_reference": "BND-2026-01", "country_code": "GB", "status": "established", "premium_layout": "layout_a", "claims_layout": "claims_a", "resubmit": {"gross_premium_delta_pct": 0.08}},
+      {"name": "Kestrel Cover Services", "coverholder_reference": "CH-8802", "binder_reference": "BND-2026-02", "country_code": "GB", "status": "established", "premium_layout": "layout_b", "claims_layout": "claims_b"},
+      {"name": "Ridgeway Binder Co", "coverholder_reference": "CH-8803", "binder_reference": "BND-2026-03", "country_code": "GB", "status": "established", "premium_layout": "layout_a", "claims_layout": "claims_a", "drift": {"layout": "layout_a_drift"}},
+      {"name": "Saltmarsh Underwriting", "coverholder_reference": "CH-8810", "binder_reference": "BND-2026-05", "country_code": "IE", "status": "new", "premium_layout": "layout_c", "claims_layout": "claims_c"}
+    ],
+    "unusable_drop": {"reason": "unreadable — image-only scan, no extractable table"}
+  }
+}

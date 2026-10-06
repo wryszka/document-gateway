@@ -1,0 +1,4 @@
+fastapi
+uvicorn[standard]
+databricks-sdk>=0.133
+openpyxl

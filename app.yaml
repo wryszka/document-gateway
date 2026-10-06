@@ -1,0 +1,8 @@
+# Databricks Apps entry point. FastAPI served by uvicorn on port 8000.
+# The whole repo is synced as the app source, so lib.py / jobs / data are importable
+# (app/server/app.py also inserts the repo root on sys.path).
+command: ["uvicorn", "app.server.app:app", "--host", "0.0.0.0", "--port", "8000"]
+
+env:
+  - name: DATABRICKS_APP_DEFAULT_AUTH
+    value: "1"

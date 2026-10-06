@@ -1,0 +1,1493 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Document Gateway</title>
+  <link rel="stylesheet" href="/tokens.css">
+  <style>
+    /* Inline overrides and layout-specific CSS */
+    .content{overflow-y:auto}
+    .details-summary{margin-bottom:18px;padding:0}
+    .toast{position:fixed;bottom:20px;right:20px;background:#fff;border:1px solid var(--line);border-radius:12px;padding:14px 18px;box-shadow:var(--shadow-lg);z-index:50;animation:slideIn .3s}
+    @keyframes slideIn{from{transform:translateY(100px);opacity:0}to{transform:translateY(0);opacity:1}}
+    .error-banner{background:#fee2e2;border:1px solid #fecaca;border-radius:12px;padding:12px 16px;color:#991b1b;margin-bottom:16px}
+    .loading-overlay{position:absolute;inset:0;background:rgba(255,255,255,.7);display:flex;align-items:center;justify-content:center;z-index:10}
+    .reconciliation-table{width:100%;font-size:13px;border-collapse:collapse}
+    .reconciliation-table th{background:#f8fafc;padding:9px 12px;text-align:left;font-weight:700;font-size:10.5px;text-transform:uppercase;letter-spacing:.07em;color:var(--mut);border-bottom:1px solid var(--line)}
+    .reconciliation-table td{padding:9px 12px;border-bottom:1px solid var(--line)}
+    .reconciliation-table input{padding:6px;border:1px solid var(--line2);border-radius:6px;font:13px system-ui;width:100%}
+    .lineage-chain{display:flex;gap:12px;align-items:stretch;margin-top:12px;flex-wrap:wrap}
+    .lineage-node{background:#f8fafc;border:1px solid var(--line2);border-radius:8px;padding:12px;flex:0 1 auto;min-width:140px}
+    .lineage-node .type{font-size:10px;color:var(--mut);font-weight:700;text-transform:uppercase;letter-spacing:.06em}
+    .lineage-node .content{font-size:13px;font-weight:600;color:var(--ink);margin-top:4px}
+    .lineage-arrow{color:var(--mut2);font-weight:700;align-self:center}
+    .completeness-flag{display:inline-flex;align-items:center;gap:6px;font-size:12px;font-weight:600}
+    .pill{display:inline-block;padding:6px 11px;border-radius:20px;background:var(--amber-bg);color:var(--amber-ink);font-size:11px;font-weight:700}
+    .pill.live{background:#f0f9ff;color:#0369a1}
+    .pill.cached{background:#fef3c7;color:#92400e}
+    @media(max-width:820px){
+      .main{padding:16px 20px}
+      .tiles{grid-template-columns:1fr}
+    }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <aside class="sidebar">
+      <div class="brand">
+        <div class="brickmark">
+          <i></i><i></i><i></i><i></i>
+        </div>
+        <div>
+          <div class="bt">Bricksurance</div>
+          <div class="bs">Document Gateway</div>
+        </div>
+      </div>
+      <nav class="nav" id="nav"></nav>
+      <div class="side-foot">
+        <div style="font-size:11px;font-weight:700;color:#cbd5e1;margin-bottom:8px">MODE</div>
+        <button class="pill live" id="modeBtn" style="width:100%;text-align:center;border:none;cursor:pointer;font-weight:700">LIVE</button>
+      </div>
+    </aside>
+    <main class="main">
+      <div class="content" id="app"></div>
+    </main>
+  </div>
+
+  <div class="modal" id="confirmModal">
+    <div class="box">
+      <h3 style="margin:0 0 12px">Confirm</h3>
+      <p id="confirmText" style="margin:0 0 12px;font-size:13px;color:var(--slate)"></p>
+      <label for="confirmReason">Reason (optional):</label>
+      <textarea id="confirmReason" style="min-height:60px"></textarea>
+      <div style="display:flex;gap:10px;margin-top:16px">
+        <button class="act" id="confirmBtn" style="flex:1">Confirm</button>
+        <button class="ghost" id="cancelBtn" style="flex:1">Cancel</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // Global state
+    let MODE = 'cached';
+    let error = null;
+    let toasts = [];
+    // Three document flows. Each scopes the nav to its own screens so a user of one
+    // flow never sees another's jargon (MRC people don't see bordereaux, etc.).
+    const FLOWS = {
+      mrc: {label:'Market Reform Contract', short:'MRC', icon:'📜', sub:'Lloyd\'s MRC v3 · open market',
+        views:[
+          {id:'mrc_inbox', label:'Inbox', icon:'📥'},
+          {id:'mrc_recognition', label:'Schema Recognition', icon:'🧬'},
+          {id:'mrc_schemas', label:'Schema Repository', icon:'🗄️'},
+          {id:'mrc_certainty', label:'Contract Certainty', icon:'✅'},
+          {id:'mrc_cdr', label:'Core Data Record', icon:'🧾'},
+          {id:'mrc_lineage', label:'Lineage', icon:'🔗'},
+          {id:'mrc_metrics', label:'Metrics', icon:'📈'},
+          {id:'mrc', label:'Contracts & Ask', icon:'💬'},
+          {id:'mrc_semantics', label:'ACORD Semantics', icon:'🔤'},
+          {id:'mrc_audit', label:'Audit', icon:'🔍'},
+          {id:'learn', label:'Learn', icon:'ℹ️'}
+        ]},
+      bordereaux: {label:'Bordereaux', short:'Bordereaux', icon:'📊', sub:'Delegated authority · premium & claims',
+        views:[
+          {id:'inbox', label:'Inbox', icon:'📥'},
+          {id:'quarantine', label:'Quarantine & Remap', icon:'⚠️'},
+          {id:'schema', label:'Schema Recognition', icon:'🧬'},
+          {id:'book', label:'The Book', icon:'📖'},
+          {id:'lineage', label:'Lineage', icon:'🔗'},
+          {id:'templates', label:'Templates', icon:'📋'},
+          {id:'audit', label:'Audit', icon:'🔍'},
+          {id:'eval', label:'Eval', icon:'✓'},
+          {id:'ask', label:'Ask', icon:'💬'},
+          {id:'learn', label:'Learn', icon:'ℹ️'}
+        ]},
+      health_slip: {label:'Health renewal slip', short:'Renewal slip', icon:'🏥', sub:'Config-port',
+        views:[
+          {id:'config-port', label:'Config-port', icon:'🧩'},
+          {id:'learn', label:'Learn', icon:'ℹ️'}
+        ]}
+    };
+    const FLOW_ORDER = ['mrc','bordereaux','health_slip'];
+    function flowForView(id){ for(const f of FLOW_ORDER){ if(FLOWS[f].views.some(v=>v.id===id)) return f; } return null; }
+
+    // Fetch helper with loading state
+    async function fetchJSON(path, opts = {}) {
+      const spinId = 'spin_' + Math.random().toString(36).slice(2);
+      const container = document.querySelector('.content');
+      const spin = document.createElement('span');
+      spin.className = 'spin';
+      spin.id = spinId;
+      if(container && opts.showSpinner !== false) {
+        const existing = container.querySelector('.spin');
+        if(!existing) container.appendChild(spin);
+      }
+      try {
+        const url = new URL(path, window.location.origin);
+        if(opts.method === 'POST' || opts.method === 'PUT') {
+          url.searchParams.set('mode', MODE);
+        }
+        const response = await fetch(url.toString(), {
+          method: opts.method || 'GET',
+          headers: {'Content-Type': 'application/json', ...opts.headers},
+          body: opts.body ? JSON.stringify(opts.body) : undefined
+        });
+        if(!response.ok) throw new Error(`HTTP ${response.status}`);
+        const data = await response.json();
+        spin.remove();
+        error = null;
+        return data;
+      } catch(e) {
+        spin.remove();
+        error = e.message;
+        throw e;
+      }
+    }
+
+    // Toast notification
+    function toast(msg, duration = 3000) {
+      const el = document.createElement('div');
+      el.className = 'toast';
+      el.textContent = msg;
+      document.body.appendChild(el);
+      setTimeout(() => el.remove(), duration);
+    }
+
+    // Modal confirm
+    async function confirm(text) {
+      return new Promise((resolve) => {
+        const modal = document.getElementById('confirmModal');
+        const confirmText = document.getElementById('confirmText');
+        const confirmReason = document.getElementById('confirmReason');
+        const confirmBtn = document.getElementById('confirmBtn');
+        const cancelBtn = document.getElementById('cancelBtn');
+
+        confirmText.textContent = text;
+        confirmReason.value = '';
+        modal.style.display = 'flex';
+
+        const cleanup = () => {
+          modal.style.display = 'none';
+          confirmBtn.removeEventListener('click', onConfirm);
+          cancelBtn.removeEventListener('click', onCancel);
+        };
+
+        const onConfirm = () => {
+          cleanup();
+          resolve({confirmed: true, reason: confirmReason.value});
+        };
+        const onCancel = () => {
+          cleanup();
+          resolve({confirmed: false, reason: ''});
+        };
+
+        confirmBtn.addEventListener('click', onConfirm);
+        cancelBtn.addEventListener('click', onCancel);
+      });
+    }
+
+    // Format money
+    function formatMoney(num, currency = 'GBP') {
+      if(num == null) return '—';
+      const sign = num < 0 ? '−' : '';
+      const abs = Math.abs(num);
+      const formatted = new Intl.NumberFormat('en-GB', {
+        minimumFractionDigits: 0,
+        maximumFractionDigits: 0
+      }).format(abs);
+      const sym = currency === 'EUR' ? '€' : currency === 'USD' ? '$' : '£';
+      return sign + sym + formatted;
+    }
+
+    // Render views
+    const views = {
+      'home': async function() {
+        const cards = FLOW_ORDER.map(function(f, i){
+          const fl = FLOWS[f]; const first = fl.views[0].id;
+          return `<a href="#${first}" style="display:flex;align-items:center;gap:16px;padding:20px;background:var(--card);border:1px solid var(--line);border-radius:14px;box-shadow:var(--shadow);text-decoration:none;color:inherit">
+            <div style="font-size:34px;line-height:1">${fl.icon}</div>
+            <div><div style="font-size:16px;font-weight:800;color:var(--ink)">${i+1}. ${escapeHtml(fl.label)}</div>
+            <div style="font-size:12px;color:var(--mut);margin-top:2px">${escapeHtml(fl.sub)}</div></div>
+          </a>`;
+        }).join('');
+        return `
+          <details class="details-summary" open><summary>What am I seeing?</summary>
+            <div class="body">Pick a document flow. Each is the same governed loop — recognise a document's data points, record its schema once, then let matching files flow straight through — applied to a different counterparty document. Start with Market Reform Contracts.</div>
+          </details>
+          <h1 style="margin:6px 0 4px">Document Gateway</h1>
+          <div style="color:var(--mut);margin-bottom:22px">One governed loop, three document flows — choose where to start.</div>
+          <div style="display:grid;grid-template-columns:1fr;gap:14px;max-width:640px">${cards}</div>`;
+      },
+
+      'mrc_inbox': async function() {
+        const d = await fetchJSON('/api/mrc/inbox');
+        const c = d.state_counts || {};
+        const META = {
+          awaiting_recognition: ['differs', 'Awaiting recognition'],
+          processing: ['plain', 'Processing…'],
+          recognised: ['active', 'Recognised → ingested'],
+          unrecognised: ['quarantined', 'Needs review (HITL)'],
+          rejected: ['plain', 'Rejected — not an MRC'],
+          returned_to_broker: ['plain', 'Returned to broker']
+        };
+        const m = s => META[s] || ['plain', s];
+        const busy = (c.processing || 0) > 0;
+        const act = x => x.inbound_state === 'unrecognised'
+          ? `<button class="ghost" data-mrc-review="reject" data-doc="${escapeAttr(x.doc_id)}">Reject — not an MRC</button>
+             <button class="ghost" data-mrc-review="return" data-doc="${escapeAttr(x.doc_id)}">Return to broker</button>` : '';
+        return `
+          <details class="details-summary" open><summary>What am I seeing?</summary>
+            <div class="body">Every document that has arrived and where it is in the loop. A contract that matches the recorded schema is recognised and ingested automatically. Anything that doesn't match is held for a person to decide — it never lands on its own.</div>
+          </details>
+          ${!d.schema_registered ? '<div class="banner">No MRC schema recorded yet — open <b>Schema Recognition</b> to confirm the first contract. After that, matching contracts flow straight through.</div>' : ''}
+          ${busy ? '<div class="banner"><span class="spin"></span> Processing contracts against the recorded schema — they appear as recognised one by one.</div>' : ''}
+          <div class="tiles">
+            <div class="tile"><div class="k">Awaiting recognition</div><div class="v warn">${(c.awaiting_recognition || 0) + (c.processing || 0)}</div></div>
+            <div class="tile"><div class="k">Recognised</div><div class="v pos">${c.recognised || 0}</div></div>
+            <div class="tile"><div class="k">Needs review</div><div class="v neg">${c.unrecognised || 0}</div></div>
+            <div class="tile"><div class="k">Resolved by a person</div><div class="v">${(c.rejected || 0) + (c.returned_to_broker || 0)}</div></div>
+            <div class="tile"><div class="k">Total</div><div class="v">${d.documents.length}</div></div>
+          </div>
+          <div class="card"><h2 style="margin-top:0">Documents</h2>
+            <table><thead><tr><th>File</th><th>Broker</th><th>State</th><th></th></tr></thead>
+            <tbody>${d.documents.map(x => `<tr>
+              <td style="font-weight:600">${escapeHtml(x.file_name)}</td>
+              <td>${escapeHtml(x.counterparty || '—')}</td>
+              <td><span class="chip ${m(x.inbound_state)[0]}">${escapeHtml(m(x.inbound_state)[1])}</span></td>
+              <td style="white-space:nowrap">${act(x)}</td></tr>`).join('')}</tbody></table></div>
+          <script>
+            document.querySelectorAll('[data-mrc-review]').forEach(function(b){
+              b.addEventListener('click', async function(){
+                var action = b.getAttribute('data-mrc-review');
+                var c = await confirm(action === 'reject' ? 'Reject this document? It is not a Market Reform Contract.' : 'Return this document to the broker for a full MRC?');
+                if(!c.confirmed){ return; }
+                try{
+                  await fetchJSON('/api/mrc/review',{method:'POST',body:{doc_id:b.getAttribute('data-doc'),action:action,reason:c.reason}});
+                  toast(action === 'reject' ? 'Rejected — decision recorded' : 'Returned to broker — decision recorded');
+                  render();
+                }catch(e){ toast('Error: '+e.message); }
+              });
+            });
+            if (${busy ? 'true' : 'false'}) {
+              setTimeout(function(){ if((window.location.hash||'').indexOf('#mrc_inbox')===0){ render(); } }, 2500);
+            }
+          <\/script>`;
+      },
+
+      'mrc_recognition': async function() {
+        const p = await fetchJSON('/api/mrc/propose');
+        if (!p.doc_id) {
+          return `<details class="details-summary" open><summary>What am I seeing?</summary>
+            <div class="body">The recognition step for the next unrecognised MRC.</div></details>
+            <div class="card">No documents awaiting recognition — every conforming contract has been recognised. See <a href="#mrc">Contracts &amp; Ask</a>.</div>`;
+        }
+        const rows = p.points.map(pt => `<tr>
+          <td style="font-weight:600">${escapeHtml(pt.label)}${pt.core ? ' <span class="chip plain">core</span>' : ''}</td>
+          <td><code>${escapeHtml(pt.acord)}</code></td>
+          <td>${pt.cdr ? escapeHtml(pt.cdr) : '<span style="color:var(--mut)">— (wording only)</span>'}</td>
+          <td>${escapeHtml(pt.section)}</td>
+          <td><span class="chip ${pt.status === 'identified' ? 'active' : 'quarantined'}">${pt.status === 'identified' ? 'identified' : 'not found'}</span></td>
+          <td>${escapeHtml(pt.value || '—')}${pt.source_quote ? `<div style="font-size:11px;color:var(--mut);margin-top:3px">“${escapeHtml(pt.source_quote)}”</div>` : ''}</td>
+          <td class="num">${pt.confidence ? (pt.confidence * 100).toFixed(0) + '%' : '—'}</td></tr>`).join('');
+        return `
+          <details class="details-summary" open><summary>What am I seeing?</summary>
+            <div class="body">These are the ACORD data points we expect from an MRC. Extraction identifies all or some of them. When you confirm, the schema is recorded in the repository — and every matching contract after this flows straight through.</div>
+          </details>
+          <div class="strip">
+            <div><div class="lbl">Document</div><div class="big brand" style="font-size:19px">${escapeHtml(p.file_name)}</div></div>
+            <div><div class="lbl">Core data points identified</div><div class="big">${p.core_found}/${p.core_total}</div></div>
+            <div><div class="lbl">Conforms to MRC structure</div><div class="big ${p.conforming ? 'pos' : 'neg'}">${p.conforming ? 'Yes' : 'No'}</div></div>
+          </div>
+          <div class="card"><h2 style="margin-top:0">Expected ACORD data points</h2>
+            <table><thead><tr><th>Data point</th><th>ACORD binding</th><th>Core Data Record field (indicative)</th><th>MRC section</th><th>Status</th><th>Value · source line</th><th class="num">Conf.</th></tr></thead>
+            <tbody>${rows}</tbody></table>
+            <div style="margin-top:16px;display:flex;align-items:center;gap:12px">
+              <button class="act" id="mrcConfirmBtn">Confirm &amp; register schema</button>
+              <span style="color:var(--mut);font-size:12px">Records "Lloyd's MRC (ACORD)" in the schema repository; the other contracts are then recognised and ingested automatically — watch them flip in the Inbox.</span>
+            </div>
+          </div>
+          <script>
+            document.getElementById('mrcConfirmBtn')?.addEventListener('click', async function(){
+              var b=this; b.disabled=true; b.textContent='Recording schema…';
+              try{
+                var r=await fetch('/api/mrc/confirm?mode='+MODE,{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'});
+                var d=await r.json(); if(!r.ok) throw new Error('HTTP '+r.status);
+                toast('Schema recorded — matching contracts are now flowing through');
+                setTimeout(function(){ window.location.hash='#mrc_inbox'; },900);
+              }catch(e){ toast('Error: '+e.message); b.disabled=false; b.textContent='Confirm & register schema'; }
+            });
+          <\/script>`;
+      },
+
+      'mrc_schemas': async function() {
+        const d = await fetchJSON('/api/mrc/schemas');
+        if (!d.schemas.length) {
+          return `<details class="details-summary" open><summary>What am I seeing?</summary>
+            <div class="body">The schema repository — recognised MRC schemas are recorded here.</div></details>
+            <div class="card">No schema registered yet — confirm one in <a href="#mrc_recognition">Schema Recognition</a>.</div>`;
+        }
+        return `<details class="details-summary" open><summary>What am I seeing?</summary>
+            <div class="body">The schema repository. Once an MRC schema is recorded here, every new contract matching it is recognised and flows straight through — no re-mapping.</div></details>` +
+          d.schemas.map(function(s){
+            var pts = Object.keys(JSON.parse(s.field_map || '{}'));
+            return `<div class="card"><h2 style="margin-top:0">${escapeHtml(s.counterparty)} <span class="chip active">${escapeHtml(s.template_version)}</span></h2>
+              <div style="color:var(--mut);margin-bottom:10px">Recorded by ${escapeHtml(s.created_by)} · ${new Date(s.created_at).toLocaleString()} · ${s.field_count} data points</div>
+              <div>${pts.map(k => `<span class="chip plain" style="margin:2px">${escapeHtml(k)}</span>`).join('')}</div></div>`;
+          }).join('');
+      },
+
+      'mrc_semantics': async function() {
+        const d = await fetchJSON('/api/mrc/semantics');
+        const rows = d.data_points.map(x => `<tr>
+          <td style="font-weight:600">${escapeHtml(x.data_point)}</td>
+          <td><code>${escapeHtml(x.entity)}.${escapeHtml(x.attribute)}</code></td>
+          <td>${x.core ? '<span class="chip plain">core</span>' : ''}</td>
+          <td><span class="chip ${x.recognised ? 'active' : 'differs'}">${x.recognised ? 'recognised' : 'not yet'}</span></td>
+          <td class="num">${x.instances}</td></tr>`).join('');
+        return `
+          <details class="details-summary" open><summary>What am I seeing?</summary>
+            <div class="body">The ACORD semantics this process uses: every expected data point, the ACORD entity and attribute it binds to, and in how many of the landed contracts we recognised it.</div>
+          </details>
+          <div class="strip">
+            <div><div class="lbl">ACORD coverage</div><div class="big brand">${d.coverage_pct}%</div></div>
+            <div><div class="lbl">Recognised</div><div class="big">${d.recognised}/${d.required}</div></div>
+          </div>
+          <div class="card"><h2 style="margin-top:0">Required vs recognised (ACORD)</h2>
+            <table><thead><tr><th>Data point</th><th>ACORD binding</th><th></th><th>Status</th><th class="num">Contracts</th></tr></thead>
+            <tbody>${rows}</tbody></table></div>`;
+      },
+
+      'config-port': async function() {
+        const d = await fetchJSON('/api/tenant_config?tenant=health_slip');
+        return `
+          <details class="details-summary" open><summary>What am I seeing?</summary>
+            <div class="body">The health renewal-slip is a whole new document family — yet onboarding it added <strong>no new pipeline code</strong>. Everything below (its fields, the carrier's column labels, and how each maps into a governed table) is declared in <strong>one config file</strong>. The same engine that trusts, extracts, reconciles and lands bordereaux handles it. This is the "the entire ingestion front-end is now one config file" proof.</div>
+          </details>
+          <div class="banner">Onboarding the health renewal-slip family = this one file (<code>${escapeHtml(d.path)}</code>, ${d.lines} lines). No new pipeline code.</div>
+          <div class="card">
+            <pre style="background:#f8fafc;padding:16px;border-radius:8px;overflow-x:auto;font:12px ui-monospace,Menlo,monospace;margin:0;color:var(--slate2);line-height:1.5">${escapeHtml(d.config)}</pre>
+          </div>`;
+      },
+      'eval': async function() {
+        const data = await fetchJSON('/api/eval');
+        const overall = data.overall || [];
+        const fields = data.fields || [];
+        if (!data.run_id) {
+          return `<details class="details-summary" open><summary>What am I seeing?</summary>
+            <div class="body">Accuracy of the AI extraction path, scored against synthetic ground truth.</div></details>
+            <div class="card">No eval run yet — run <code>eval/run_eval.py</code>.</div>`;
+        }
+        const models = [...new Set(fields.map(f => f.model))];
+        const fieldNames = [...new Set(fields.map(f => f.field))];
+        const cell = (fn, m) => {
+          const r = fields.find(x => x.field === fn && x.model === m);
+          if (!r) return '<td>—</td>';
+          const pct = (r.accuracy * 100).toFixed(0) + '%';
+          const cls = r.accuracy >= 1 ? 'active' : 'differs';
+          return `<td><span class="chip ${cls}">${pct}</span></td>`;
+        };
+        return `
+          <details class="details-summary" open><summary>What am I seeing?</summary>
+            <div class="body">The AI extraction path maps each source column to a canonical dictionary field. Because we generate the documents, the true mapping is known — so we score it, per field and per model, including decoy columns the model must ignore. This is the answer to "doesn't the model just hallucinate?".</div>
+          </details>
+          <div class="tiles">
+            ${overall.map(o => `<div class="tile"><div class="k">${escapeHtml(o.model)}</div>
+              <div class="v pos">${(o.accuracy * 100).toFixed(0)}%</div>
+              <div class="k">${o.correct}/${o.total} fields${o.mlflow_run_id ? ' · logged to MLflow' : ''}</div></div>`).join('')}
+          </div>
+          <div class="card">
+            <h2>Per-field mapping accuracy — model comparison</h2>
+            <table><thead><tr><th>Field</th>${models.map(m => `<th>${escapeHtml(m)}</th>`).join('')}</tr></thead>
+              <tbody>${fieldNames.map(fn => `<tr><td style="font-weight:600">${escapeHtml(fn)}</td>${models.map(m => cell(fn, m)).join('')}</tr>`).join('')}</tbody>
+            </table>
+          </div>`;
+      },
+      'mrc_certainty': async function() {
+        const d = await fetchJSON('/api/mrc/certainty');
+        const rows = d.rows || [];
+        const explain = `<details class="details-summary" open><summary>What am I seeing?</summary>
+            <div class="body">Contract certainty: simple, deterministic rules every bound contract should pass — the order is fully signed, the several-liability notice and sanctions clause are present, the period and reference are well-formed, the slip leader is on the security, and the governing law is stated. No AI decides these; each result shows the line it was checked against.</div></details>`;
+        if (!rows.length) return explain + `<div class="card">No contracts ingested yet — record the schema in <a href="#mrc_recognition">Schema Recognition</a> first.</div>`;
+        const byC = {};
+        rows.forEach(r => { (byC[r.umr] = byC[r.umr] || {umr: r.umr, insured: r.insured_name, cls: r.class_of_business, mrc_id: r.mrc_id, checks: []}).checks.push(r); });
+        const contracts = Object.values(byC);
+        const passing = contracts.filter(c => c.checks.every(x => x.status === 'pass')).length;
+        const card = c => {
+          const fails = c.checks.filter(x => x.status === 'fail');
+          return `<div class="card" style="border-left:4px solid ${fails.length ? 'var(--red)' : 'var(--emerald)'}">
+            <div style="display:flex;justify-content:space-between;align-items:baseline;gap:12px">
+              <h2 style="margin:0">${escapeHtml(c.insured)} <span style="font-weight:400;color:var(--mut);font-size:13px">${escapeHtml(c.cls)} · ${escapeHtml(c.umr)}</span></h2>
+              <span class="chip ${fails.length ? 'quarantined' : 'active'}">${fails.length ? fails.length + ' check' + (fails.length > 1 ? 's' : '') + ' failed' : 'all checks pass'}</span>
+            </div>
+            <table style="margin-top:10px"><tbody>${c.checks.map(x => `<tr>
+              <td style="width:110px"><span class="chip ${x.status === 'pass' ? 'active' : 'quarantined'}">${x.status === 'pass' ? '✓ pass' : '✗ fail'}</span></td>
+              <td style="font-weight:600">${escapeHtml(x.label)}</td>
+              <td style="color:var(--mut);font-size:12px">${escapeHtml(x.detail)}</td></tr>`).join('')}</tbody></table>
+            <div style="margin-top:8px"><a href="#mrc_lineage?m=${encodeURIComponent(c.mrc_id)}">See every value and its source line →</a></div></div>`;
+        };
+        return explain + `<div class="tiles">
+            <div class="tile"><div class="k">Contracts checked</div><div class="v">${contracts.length}</div></div>
+            <div class="tile"><div class="k">Pass every check</div><div class="v pos">${passing}</div></div>
+            <div class="tile"><div class="k">Need attention</div><div class="v neg">${contracts.length - passing}</div></div>
+            <div class="tile"><div class="k">Checks run</div><div class="v">${d.total}</div></div>
+            <div class="tile"><div class="k">Checks failed</div><div class="v neg">${d.failed}</div></div>
+          </div>` + contracts.sort((a, b) => b.checks.filter(x => x.status === 'fail').length - a.checks.filter(x => x.status === 'fail').length).map(card).join('');
+      },
+
+      'mrc_cdr': async function() {
+        const d = await fetchJSON('/api/mrc/cdr');
+        const f = d.fields || [];
+        const explain = `<details class="details-summary" open><summary>What am I seeing?</summary>
+            <div class="body">How the contracts we have read line up against the Core Data Record. Each row is a data field the record needs, the MRC section it comes from, the ACORD term it is held under, and how many of the landed contracts supplied it. This is an indicative mapping for discussion — field names are paraphrased, not the published specification.</div></details>`;
+        if (!f.length) return explain + `<div class="card">No contracts ingested yet — record the schema in <a href="#mrc_recognition">Schema Recognition</a> first.</div>`;
+        const rows = f.map(x => {
+          const full = Number(x.supplied) === Number(x.contracts);
+          return `<tr><td style="font-weight:600">${escapeHtml(x.cdr_field)}</td>
+            <td>${escapeHtml(x.section)}</td><td><code>${escapeHtml(x.acord_binding)}</code></td>
+            <td class="num">${x.supplied} / ${x.contracts}</td>
+            <td><span class="chip ${full ? 'active' : 'differs'}">${full ? 'complete' : 'gaps'}</span></td></tr>`;
+        }).join('');
+        return explain + `<div class="strip">
+            <div><div class="lbl">Record completeness</div><div class="big brand">${d.completeness_pct}%</div></div>
+            <div><div class="lbl">Fields per contract</div><div class="big">${d.fields_per_contract}</div></div>
+            <div><div class="lbl">Contracts</div><div class="big">${d.contracts}</div></div>
+          </div>
+          <div class="banner">${escapeHtml(d.note)}</div>
+          <div class="card"><h2 style="margin-top:0">Core Data Record fields, filled from the MRCs</h2>
+            <table><thead><tr><th>Core Data Record field (indicative)</th><th>MRC section</th><th>ACORD term</th><th class="num">Supplied</th><th></th></tr></thead>
+            <tbody>${rows}</tbody></table></div>`;
+      },
+
+      'mrc_lineage': async function() {
+        const list = (await fetchJSON('/api/mrc')).mrcs || [];
+        const explain = `<details class="details-summary" open><summary>What am I seeing?</summary>
+            <div class="body">Pick a contract to see every value we extracted, the section of the MRC it was read from, and the exact source line — so any number can be traced back to the wording it came from.</div></details>`;
+        if (!list.length) return explain + `<div class="card">No contracts ingested yet — record the schema in <a href="#mrc_recognition">Schema Recognition</a> first.</div>`;
+        const qs = new URLSearchParams((window.location.hash.split('?')[1]) || '');
+        const sel = qs.get('m') || list[0].mrc_id;
+        const d = await fetchJSON('/api/mrc/lineage?mrc_id=' + encodeURIComponent(sel));
+        const opts = list.map(x => `<option value="${escapeAttr(x.mrc_id)}" ${x.mrc_id === sel ? 'selected' : ''}>${escapeHtml(x.insured_name)} — ${escapeHtml(x.class_of_business)}</option>`).join('');
+        const rows = d.points.map(x => `<tr>
+          <td style="font-weight:600">${escapeHtml(x.label)}</td>
+          <td>${escapeHtml(x.value || '—')}</td>
+          <td>${escapeHtml(x.section)}</td>
+          <td style="font-size:12px;color:var(--slate2)">${x.source_quote ? '“' + escapeHtml(x.source_quote) + '”' : '<span style="color:var(--mut)">not found in the contract</span>'}</td>
+          <td><code style="font-size:11px">${escapeHtml(x.acord_binding)}</code></td></tr>`).join('');
+        return explain + `<div class="card" style="display:flex;gap:12px;align-items:center">
+            <label for="mrcLinSel" style="font-weight:600">Contract</label>
+            <select id="mrcLinSel" aria-label="Choose a contract" style="flex:1;padding:8px;border:1px solid var(--line2);border-radius:8px">${opts}</select>
+          </div>
+          <div class="strip">
+            <div><div class="lbl">Source document</div><div class="big brand" style="font-size:18px">${escapeHtml(d.contract.file_name)}</div></div>
+            <div><div class="lbl">UMR</div><div class="big" style="font-size:18px">${escapeHtml(d.contract.umr)}</div></div>
+            <div><div class="lbl">Values traced</div><div class="big">${d.points.length}</div></div>
+          </div>
+          <div class="card"><h2 style="margin-top:0">Every value, and the line it came from</h2>
+            <table><thead><tr><th>Data point</th><th>Value</th><th>MRC section</th><th>Source line in the contract</th><th>ACORD term</th></tr></thead>
+            <tbody>${rows}</tbody></table>
+            <div style="margin-top:10px;font-size:12px"><a href="${escapeAttr(d.download)}" target="_blank" rel="noopener">Open the original PDF in the governed volume ↗</a></div></div>
+          <script>
+            document.getElementById('mrcLinSel').addEventListener('change', function(){
+              window.location.hash = '#mrc_lineage?m=' + encodeURIComponent(this.value);
+            });
+          <\/script>`;
+      },
+
+      'mrc_audit': async function() {
+        const d = await fetchJSON('/api/mrc/audit');
+        const ev = d.events || [];
+        return `<details class="details-summary" open><summary>What am I seeing?</summary>
+            <div class="body">The governance trail for this flow, newest first: every recognition, schema decision, ingest, failed certainty check, correction and review — who did it and when. Nothing is edited or deleted; each act is a new record.</div></details>
+          <div class="card"><h2 style="margin-top:0">Audit trail</h2>
+            ${ev.length ? `<table><thead><tr><th>When</th><th>Event</th><th>By</th><th>Subject</th><th>Detail</th></tr></thead><tbody>${ev.map(e => `<tr>
+              <td style="white-space:nowrap">${escapeHtml(new Date(e.created_at).toLocaleString())}</td>
+              <td><span class="chip plain">${escapeHtml(e.event_type)}</span></td>
+              <td>${escapeHtml(e.actor || '—')}</td>
+              <td>${escapeHtml(e.subject || '—')}</td>
+              <td style="font-size:12px;color:var(--mut)">${escapeHtml(e.detail || '')}</td></tr>`).join('')}</tbody></table>` : 'No events yet.'}
+          </div>`;
+      },
+
+      'mrc_metrics': async function() {
+        const d = await fetchJSON('/api/mrc/metrics');
+        const contracts = d.contracts || [];
+        const t = d.totals || {};
+        const fmt = (x, ccy) => (x == null || x === '') ? '—' : formatMoney(Number(x), ccy || 'GBP');
+        const explain = `
+          <details class="details-summary" open>
+            <summary>What am I seeing?</summary>
+            <div class="body">The numeric metrics parsed from each contract's prose (premium and headline limit are parsed deterministically from the wording, which is kept as the source). Charts summarise the book; the table below lets you correct any value in place — every change is recorded as a governed, audited decision.</div>
+          </details>`;
+        if (!contracts.length) {
+          return explain + `<div class="card">No contracts ingested yet — recognise the schema first in <a href="#mrc_recognition">Schema Recognition</a>, then contracts flow through and their metrics appear here.</div>`;
+        }
+        // Single-hue horizontal bars (dataviz: thin marks, rounded ends on the baseline, direct value labels, no legend for one series).
+        const hbar = (items, title) => {
+          const max = Math.max(1, ...items.map(i => Number(i.v) || 0));
+          const rowH = 40, W = 720, labelW = 210, valW = 150, barMax = W - labelW - valW;
+          const h = items.length * rowH + 12;
+          const rows = items.map((it, i) => {
+            const y = i * rowH + 10, len = Math.max(2, (Number(it.v) || 0) / max * barMax);
+            return `<text x="0" y="${y + 21}" font-size="12.5" fill="var(--ink)">${escapeHtml(it.label)}</text>`
+              + `<rect x="${labelW}" y="${y + 8}" width="${len}" height="18" rx="4" fill="var(--brand)"></rect>`
+              + `<text x="${labelW + len + 8}" y="${y + 21}" font-size="12" fill="var(--mut)" font-variant-numeric="tabular-nums">${escapeHtml(it.vl)}</text>`;
+          }).join('');
+          return `<div class="card"><h2 style="margin-top:0">${escapeHtml(title)}</h2>`
+            + `<svg viewBox="0 0 ${W} ${h}" width="100%" role="img" aria-label="${escapeHtml(title)}">${rows}</svg></div>`;
+        };
+        const ccys = [...new Set(contracts.map(c => c.premium_currency).filter(Boolean))];
+        const premiumCharts = ccys.map(cc => hbar(contracts.filter(c => c.premium_currency === cc)
+            .map(c => ({label: c.class_of_business, v: c.premium_amount, vl: fmt(c.premium_amount, cc)})), 'Premium by class — ' + cc)).join('');
+        const byCcy = d.by_currency || [];
+        const opt = (v, cur) => `<option ${cur === v ? 'selected' : ''}>${v}</option>`;
+        const editRow = c => `
+          <tr>
+            <td><input data-mrc-edit data-mrc-id="${escapeAttr(c.mrc_id)}" data-field="class_of_business" aria-label="Class of business" value="${escapeAttr(c.class_of_business || '')}" style="width:100%;padding:5px;border:1px solid var(--line2);border-radius:5px"></td>
+            <td><input data-mrc-edit data-mrc-id="${escapeAttr(c.mrc_id)}" data-field="insured_name" aria-label="Insured name" value="${escapeAttr(c.insured_name || '')}" style="width:100%;padding:5px;border:1px solid var(--line2);border-radius:5px"></td>
+            <td><input data-mrc-edit data-mrc-id="${escapeAttr(c.mrc_id)}" data-field="broker_name" aria-label="Broker" value="${escapeAttr(c.broker_name || '')}" style="width:100%;padding:5px;border:1px solid var(--line2);border-radius:5px"></td>
+            <td class="num"><input data-mrc-edit data-mrc-id="${escapeAttr(c.mrc_id)}" data-field="premium_amount" aria-label="Premium amount" value="${escapeAttr(c.premium_amount || '')}" style="width:120px;padding:5px;text-align:right;border:1px solid var(--line2);border-radius:5px"></td>
+            <td><select data-mrc-edit data-mrc-id="${escapeAttr(c.mrc_id)}" data-field="premium_currency" aria-label="Currency" style="padding:5px;border:1px solid var(--line2);border-radius:5px">${['GBP','USD','EUR'].map(v => opt(v, c.premium_currency)).join('')}</select></td>
+            <td class="num"><input data-mrc-edit data-mrc-id="${escapeAttr(c.mrc_id)}" data-field="limit_amount" aria-label="Limit amount" value="${escapeAttr(c.limit_amount || '')}" style="width:130px;padding:5px;text-align:right;border:1px solid var(--line2);border-radius:5px"></td>
+          </tr>`;
+        return explain
+          + `<div class="tiles">
+               <div class="tile"><div class="k">Contracts</div><div class="v">${t.contracts}</div></div>
+               ${byCcy.map(b => `<div class="tile"><div class="k">Premium (${escapeHtml(b.currency)})</div><div class="v">${fmt(b.premium, b.currency)}</div><div class="k">${b.n} contract${b.n > 1 ? 's' : ''}</div></div>`).join('')}
+               ${byCcy.map(b => `<div class="tile"><div class="k">Limits (${escapeHtml(b.currency)})</div><div class="v">${fmt(b.limit_amt, b.currency)}</div></div>`).join('')}
+             </div>
+             <div style="font-size:11px;color:var(--mut);margin:-6px 0 14px">Totals are kept per currency — GBP and USD are never added together.</div>`
+          + `<div class="grid2">${premiumCharts}</div>`
+          + `<div class="card">
+               <h2 style="margin-top:0">Extracted metrics — edit in place</h2>
+               <div style="font-size:12px;color:var(--mut);margin-bottom:10px">Correct any value and tab out; the change is saved to the projection and recorded as a governed, audited decision.</div>
+               <table>
+                 <thead><tr><th>Class</th><th>Insured</th><th>Broker</th><th class="num">Premium</th><th>Ccy</th><th class="num">Limit</th></tr></thead>
+                 <tbody>${contracts.map(editRow).join('')}</tbody>
+               </table>
+             </div>
+             <script>
+               document.querySelectorAll('[data-mrc-edit]').forEach(function(inp){
+                 inp.addEventListener('change', async function(){
+                   try{
+                     await fetchJSON('/api/mrc/update',{method:'POST',body:{mrc_id:inp.getAttribute('data-mrc-id'),field:inp.getAttribute('data-field'),value:inp.value}});
+                     toast('Saved '+inp.getAttribute('data-field')+' — recorded & audited');
+                     render();
+                   }catch(e){ toast('Error: '+e.message); }
+                 });
+               });
+             <\/script>`;
+      },
+      'mrc': async function() {
+        const data = await fetchJSON('/api/mrc');
+        const mrcs = data.mrcs || [];
+        const cfg = await fetchJSON('/api/config');
+        const provisioning = (cfg.mrc_space_id || cfg.mrc_ka_endpoint) ? '' : ' — provisioning';
+        return `
+          <details class="details-summary" open>
+            <summary>What am I seeing?</summary>
+            <div class="body">Market Reform Contracts are prose, not tables. The gateway parses each PDF, pulls the headline facts under the standard MRC section headings, and extracts the full entity graph (limits, clauses, exclusions, insurers) — all with lineage back to the document. Ask the MRCs uses two retrievers at once: a structured one over the extracted data and a document one over the PDFs themselves.</div>
+          </details>
+          <div class="card">
+            <h2>Market Reform Contracts</h2>
+            <table>
+              <thead><tr><th>UMR</th><th>Class</th><th>Insured</th><th>Broker</th><th>Slip leader</th><th>Headline limit</th><th>Certainty</th><th></th></tr></thead>
+              <tbody>
+                ${mrcs.map(m => `
+                  <tr>
+                    <td style="font-weight:600">${escapeHtml(m.umr)}</td>
+                    <td>${escapeHtml(m.class_of_business)}</td>
+                    <td>${escapeHtml(m.insured_name)}</td>
+                    <td>${escapeHtml(m.broker_name)}</td>
+                    <td>${escapeHtml(m.slip_leader || '—')}</td>
+                    <td>${escapeHtml(m.headline_limit)}</td>
+                    <td><a href="#mrc_certainty"><span class="chip ${m.certainty_status === 'pass' ? 'active' : 'quarantined'}">${m.certainty_status === 'pass' ? 'pass' : (m.checks_failed || 0) + ' failed'}</span></a></td>
+                    <td><a href="#mrc_lineage?m=${encodeURIComponent(m.mrc_id)}">lineage →</a></td>
+                  </tr>`).join('')}
+              </tbody>
+            </table>
+          </div>
+          <div class="card">
+            <h2>Ask the MRCs${provisioning}</h2>
+            <div style="display:flex;gap:10px;margin-top:10px">
+              <input type="text" id="mrcAskInput" aria-label="Ask a question about the MRCs" placeholder="e.g. Which contracts are not fully signed, and what does the sanctions clause say?" style="flex:1;padding:9px;border:1px solid var(--line2);border-radius:8px">
+              <button class="act" id="mrcAskBtn">Ask</button>
+            </div>
+            <div id="mrcAskResult" style="margin-top:14px"></div>
+          </div>
+          <script>
+            document.getElementById('mrcAskBtn').addEventListener('click', async function(){
+              var q = document.getElementById('mrcAskInput').value.trim();
+              if(!q){ return; }
+              var box = document.getElementById('mrcAskResult');
+              box.innerHTML = '<span class="spin"></span>';
+              var res;
+              try { res = await fetchJSON('/api/mrc/ask', {method:'POST', body:{question:q}}); }
+              catch(e){ box.innerHTML = '<div class="error-banner">' + escapeHtml(e.message) + '</div>'; return; }
+              var h = '';
+              if(res.genie){
+                h += '<div class="card"><h3 style="margin-top:0">Structured — Genie over the graph</h3>';
+                if(res.genie.answer){ h += '<p style="font-size:13px">' + escapeHtml(res.genie.answer) + '</p>'; }
+                if(res.genie.sql){ h += '<pre style="background:#f8fafc;padding:10px;border-radius:8px;overflow-x:auto;font:12px ui-monospace,Menlo,monospace">' + escapeHtml(res.genie.sql) + '</pre>'; }
+                if(res.genie.error){ h += '<p class="mut">' + escapeHtml(res.genie.error) + '</p>'; }
+                h += '</div>';
+              }
+              if(res.ka){
+                h += '<div class="card"><h3 style="margin-top:0">Documents — Knowledge Assistant over the PDFs</h3><p style="font-size:13px">' + escapeHtml(res.ka.answer || res.ka.error || '') + '</p></div>';
+              } else {
+                h += '<div class="banner">Knowledge Assistant is still provisioning — the structured answer above is live.</div>';
+              }
+              box.innerHTML = h;
+            });
+          <\/script>`;
+      },
+      async inbox() {
+        try {
+          const data = await fetchJSON('/api/inbox');
+          const {state_counts = {}, documents = []} = data;
+          const {known_unchanged = 0, known_changed = 0, unknown = 0, unusable = 0} = state_counts;
+
+          return `
+            <details class="details-summary" open>
+              <summary>What am I seeing?</summary>
+              <div class="body">The Inbox shows all documents waiting for action: how many match our known patterns, how many differ, how many we don't recognize, and which ones can't be processed. Click a row to drill into that document.</div>
+            </details>
+            ${error ? `<div class="error-banner">Error: ${error}</div>` : ''}
+            <div class="tiles">
+              <div class="tile"><div class="k">Unchanged</div><div class="v pos">${known_unchanged}</div></div>
+              <div class="tile"><div class="k">Known Changed</div><div class="v warn">${known_changed}</div></div>
+              <div class="tile"><div class="k">Unknown</div><div class="v">${unknown}</div></div>
+              <div class="tile"><div class="k">Unusable</div><div class="v neg">${unusable}</div></div>
+              <div class="tile"><div class="k">Total</div><div class="v">${documents.length}</div></div>
+            </div>
+            <div class="card">
+              <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">
+                <h2>Documents</h2>
+                <div style="display:flex;gap:8px">
+                  <button class="ghost" id="runReviewQueueBtn">Run review on queue</button>
+                  <button class="ghost" id="rescanBtn">Rescan inbox</button>
+                </div>
+              </div>
+              <table>
+                <thead><tr>
+                  <th>File</th><th>Tenant</th><th>Counterparty</th><th>Family</th><th>Period</th><th>Status</th><th>Ingested</th>
+                </tr></thead>
+                <tbody>
+                  ${documents.map(d => `
+                    <tr class="row" data-doc-id="${d.doc_id}" data-status="${d.status}" data-inbound-state="${d.inbound_state}">
+                      <td style="font-weight:600">${escapeHtml(d.file_name)}</td>
+                      <td>${escapeHtml(d.tenant || '—')}</td>
+                      <td>${escapeHtml(d.counterparty || '—')}</td>
+                      <td>${escapeHtml(d.doc_family || '—')}</td>
+                      <td>${d.reporting_period || '—'}</td>
+                      <td><span class="chip ${d.status}">${d.status}</span></td>
+                      <td>${d.ingested_at ? new Date(d.ingested_at).toLocaleDateString() : '—'}</td>
+                    </tr>
+                  `).join('')}
+                </tbody>
+              </table>
+            </div>
+            <script>
+              document.querySelectorAll('table .row').forEach(r => {
+                r.addEventListener('click', () => {
+                  const docId = r.dataset.docId;
+                  const status = r.dataset.status;
+                  const state = r.dataset.inboundState;
+                  if(status === 'quarantined' && state === 'known_changed') window.location.hash = '#quarantine';
+                  else if(status === 'quarantined' && state === 'unknown') window.location.hash = '#schema';
+                  else if(status === 'active') window.location.hash = '#detail?doc_id=' + docId;
+                });
+              });
+              document.getElementById('runReviewQueueBtn')?.addEventListener('click', async () => {
+                try {
+                  await fetchJSON('/api/review', {method: 'POST'});
+                  toast('Review queue started');
+                  setTimeout(() => window.location.reload(), 1500);
+                } catch(e) {
+                  toast('Error: ' + e.message);
+                }
+              });
+              document.getElementById('rescanBtn')?.addEventListener('click', async () => {
+                try {
+                  const result = await fetchJSON('/api/ingest/scan', {method: 'POST'});
+                  toast('Scan started: ' + result.queued_count + ' documents');
+                  setTimeout(() => window.location.reload(), 1500);
+                } catch(e) {
+                  toast('Error: ' + e.message);
+                }
+              });
+            <\/script>
+          `;
+        } catch(e) {
+          return `<div class="error-banner">Failed to load inbox: ${escapeHtml(e.message)}</div>`;
+        }
+      },
+
+      async quarantine() {
+        try {
+          const inboxData = await fetchJSON('/api/inbox');
+          const knownChanged = (inboxData.documents || []).filter(d => d.status === 'quarantined' && d.inbound_state === 'known_changed');
+
+          if(knownChanged.length === 0) {
+            return `<div class="card"><p class="mut">No quarantined documents with known changes.</p></div>`;
+          }
+
+          return `
+            <details class="details-summary" open>
+              <summary>What am I seeing?</summary>
+              <div class="body">Documents that match our known patterns but with changes in specific fields. Pick one, review the changes, and choose to accept (learn the new pattern) or reject (flag for manual review).</div>
+            </details>
+            <div class="card">
+              <h2>Pick a document</h2>
+              <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px;margin-top:12px">
+                ${knownChanged.map(d => `
+                  <button class="chipq" data-doc-id="${d.doc_id}" data-click="pickDoc">
+                    <div style="font-weight:600">${escapeHtml(d.file_name)}</div>
+                    <div style="font-size:11px;color:var(--mut);margin-top:4px">${d.counterparty}</div>
+                  </button>
+                `).join('')}
+              </div>
+            </div>
+            <div id="reconcDetail"></div>
+            <script>
+              document.querySelectorAll('[data-click="pickDoc"]').forEach(btn => {
+                btn.addEventListener('click', async () => {
+                  const docId = btn.dataset.docId;
+                  try {
+                    const doc = await fetchJSON('/api/document/' + docId);
+                    const {reconciliation_detail = {}, proposed_remap = [], findings = []} = doc;
+                    const {summary = '', fields = []} = reconciliation_detail;
+
+                    const html = \`
+                      <div class="card" style="margin-top:18px">
+                        <h2>Reconciliation</h2>
+                        <div class="banner">\${escapeHtml(summary)}</div>
+                        <table class="reconciliation-table">
+                          <thead><tr>
+                            <th>Field</th><th>AI Found</th><th>Status</th>
+                          </tr></thead>
+                          <tbody>
+                            \${fields.map(f => \`
+                              <tr>
+                                <td style="font-weight:600">\${escapeHtml(f.det_label)}</td>
+                                <td>\${escapeHtml(f.ai_header)}</td>
+                                <td><span class="chip \${f.status}">\${f.status}</span></td>
+                              </tr>
+                            \`).join('')}
+                          </tbody>
+                        </table>
+                        <h3 style="margin-top:18px">Proposed Remap</h3>
+                        <table class="reconciliation-table">
+                          <thead><tr><th>Expected</th><th>Found</th></tr></thead>
+                          <tbody>
+                            \${proposed_remap.map(r => \`
+                              <tr>
+                                <td>\${escapeHtml(r.expected_label)}</td>
+                                <td>\${escapeHtml(r.found_label)}</td>
+                              </tr>
+                            \`).join('')}
+                          </tbody>
+                        </table>
+                        \${findings && findings.length > 0 ? \`
+                          <h3 style="margin-top:18px">Review Findings</h3>
+                          <table class="reconciliation-table">
+                            <thead><tr>
+                              <th>Severity</th><th>Field</th><th>Message</th>
+                            </tr></thead>
+                            <tbody>
+                              \${findings.map(f => {
+                                const severityClass = f.severity === 'high' ? 'quarantined' : f.severity === 'medium' ? 'differs' : 'plain';
+                                return \`
+                                  <tr>
+                                    <td><span class="chip \${severityClass}">\${f.severity}</span></td>
+                                    <td style="font-weight:600">\${escapeHtml(f.field)}</td>
+                                    <td>\${escapeHtml(f.message)}</td>
+                                  </tr>
+                                \`;
+                              }).join('')}
+                            </tbody>
+                          </table>
+                          <button class="ghost" id="runReviewBtn" style="margin-top:12px">Run review</button>
+                        \` : ''}
+                        <div style="display:flex;gap:10px;margin-top:16px">
+                          <button class="act" id="acceptBtn">Accept remap</button>
+                          <button class="ghost" id="rejectBtn">Reject…</button>
+                        </div>
+                      </div>
+                    \`;
+                    document.getElementById('reconcDetail').innerHTML = html;
+
+                    document.getElementById('acceptBtn').addEventListener('click', async () => {
+                      const conf = await confirm('Accept this remap and learn the pattern?');
+                      if(conf.confirmed) {
+                        const result = await fetchJSON('/api/quarantine/accept', {method: 'POST', body: {doc_id: docId}});
+                        toast('Learned → template v' + result.new_version + '; reprocessed ' + result.reprocessed_state + ', ' + result.lines + ' lines');
+                        setTimeout(() => window.location.hash = '#inbox', 1500);
+                      }
+                    });
+
+                    document.getElementById('rejectBtn').addEventListener('click', async () => {
+                      const conf = await confirm('Reject this remap?');
+                      if(conf.confirmed) {
+                        await fetchJSON('/api/quarantine/reject', {method: 'POST', body: {doc_id: docId, reason: conf.reason}});
+                        toast('Rejected and flagged for review');
+                        setTimeout(() => window.location.hash = '#inbox', 1500);
+                      }
+                    });
+
+                    document.getElementById('runReviewBtn')?.addEventListener('click', async () => {
+                      try {
+                        await fetchJSON('/api/review', {method: 'POST', body: {doc_id: docId}});
+                        toast('Review started');
+                        setTimeout(() => window.dispatchEvent(new HashChangeEvent('hashchange')), 500);
+                      } catch(e) {
+                        toast('Error: ' + e.message);
+                      }
+                    });
+                  } catch(e) {
+                    toast('Error: ' + e.message);
+                  }
+                });
+              });
+            <\/script>
+          `;
+        } catch(e) {
+          return `<div class="error-banner">Failed to load quarantine: ${escapeHtml(e.message)}</div>`;
+        }
+      },
+
+      async schema() {
+        try {
+          const inboxData = await fetchJSON('/api/inbox');
+          const unknown = (inboxData.documents || []).filter(d => d.status === 'quarantined' && d.inbound_state === 'unknown');
+
+          if(unknown.length === 0) {
+            return `<div class="card"><p class="mut">No quarantined documents with unknown schemas.</p></div>`;
+          }
+
+          return `
+            <details class="details-summary" open>
+              <summary>What am I seeing?</summary>
+              <div class="body">Documents we don't recognize. The AI proposes a field mapping; you confirm it so we learn a new schema for this counterparty.</div>
+            </details>
+            <div class="card">
+              <h2>Pick a document</h2>
+              <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px;margin-top:12px">
+                ${unknown.map(d => `
+                  <button class="chipq" data-doc-id="${d.doc_id}" data-click="proposeSchema">
+                    <div style="font-weight:600">${escapeHtml(d.file_name)}</div>
+                    <div style="font-size:11px;color:var(--mut);margin-top:4px">${d.counterparty}</div>
+                  </button>
+                `).join('')}
+              </div>
+            </div>
+            <div id="proposalDetail"></div>
+            <script>
+              document.querySelectorAll('[data-click="proposeSchema"]').forEach(btn => {
+                btn.addEventListener('click', async () => {
+                  const docId = btn.dataset.docId;
+                  try {
+                    const proposal = await fetchJSON('/api/schema/propose', {method: 'POST', body: {doc_id: docId}});
+                    const {counterparty = '', proposal: fields = [], findings = []} = proposal;
+
+                    const fieldMap = {};
+                    fields.forEach(f => { fieldMap[f.field] = f.proposed_label; });
+
+                    const html = \`
+                      <div class="card" style="margin-top:18px">
+                        <h2>Proposed Schema for \${escapeHtml(counterparty)}</h2>
+                        <table class="reconciliation-table">
+                          <thead><tr>
+                            <th>Field</th><th>Proposed Label</th><th>Confidence</th>
+                          </tr></thead>
+                          <tbody>
+                            \${fields.map(f => \`
+                              <tr>
+                                <td style="font-weight:600">\${escapeHtml(f.field)}</td>
+                                <td><input type="text" value="\${escapeHtml(f.proposed_label)}" data-field="\${escapeHtml(f.field)}" data-field-input aria-label="Proposed column mapping"></td>
+                                <td><span class="chip active">\${f.confidence}%</span></td>
+                              </tr>
+                            \`).join('')}
+                          </tbody>
+                        </table>
+                        \${findings && findings.length > 0 ? \`
+                          <h3 style="margin-top:18px">Review Findings</h3>
+                          <table class="reconciliation-table">
+                            <thead><tr>
+                              <th>Severity</th><th>Field</th><th>Message</th>
+                            </tr></thead>
+                            <tbody>
+                              \${findings.map(f => {
+                                const severityClass = f.severity === 'high' ? 'quarantined' : f.severity === 'medium' ? 'differs' : 'plain';
+                                return \`
+                                  <tr>
+                                    <td><span class="chip \${severityClass}">\${f.severity}</span></td>
+                                    <td style="font-weight:600">\${escapeHtml(f.field)}</td>
+                                    <td>\${escapeHtml(f.message)}</td>
+                                  </tr>
+                                \`;
+                              }).join('')}
+                            </tbody>
+                          </table>
+                          <button class="ghost" id="runReviewBtn" style="margin-top:12px">Run review</button>
+                        \` : ''}
+                        <div style="display:flex;gap:10px;margin-top:16px">
+                          <button class="act" id="confirmSchemaBtn">Confirm & learn counterparty</button>
+                          <button class="ghost" id="cancelSchemaBtn">Cancel</button>
+                        </div>
+                      </div>
+                    \`;
+                    document.getElementById('proposalDetail').innerHTML = html;
+
+                    document.getElementById('confirmSchemaBtn').addEventListener('click', async () => {
+                      const mapping = {};
+                      document.querySelectorAll('[data-field-input]').forEach(inp => {
+                        if(inp.value.trim()) mapping[inp.dataset.field] = inp.value.trim();
+                      });
+                      try {
+                        const result = await fetchJSON('/api/schema/confirm', {method: 'POST', body: {doc_id: docId, field_map: mapping}});
+                        toast('Learned schema v' + result.created_version + ', ' + result.lines + ' lines processed');
+                        setTimeout(() => window.location.hash = '#inbox', 1500);
+                      } catch(e) {
+                        toast('Error: ' + e.message);
+                      }
+                    });
+
+                    document.getElementById('cancelSchemaBtn').addEventListener('click', () => {
+                      document.getElementById('proposalDetail').innerHTML = '';
+                    });
+
+                    document.getElementById('runReviewBtn')?.addEventListener('click', async () => {
+                      try {
+                        await fetchJSON('/api/review', {method: 'POST', body: {doc_id: docId}});
+                        toast('Review started');
+                        setTimeout(() => window.dispatchEvent(new HashChangeEvent('hashchange')), 500);
+                      } catch(e) {
+                        toast('Error: ' + e.message);
+                      }
+                    });
+                  } catch(e) {
+                    toast('Error: ' + e.message);
+                  }
+                });
+              });
+            <\/script>
+          `;
+        } catch(e) {
+          return `<div class="error-banner">Failed to load schema: ${escapeHtml(e.message)}</div>`;
+        }
+      },
+
+      async book() {
+        try {
+          const b = await fetchJSON('/api/book');
+          const t = b.totals || {};
+          const per = b.per_coverholder || [];
+          const loss = b.loss_ratio || [];
+          const comp = (await fetchJSON('/api/completeness')).coverholders || [];
+          const isBehind = v => v === true || v === 'true';
+          const pct = v => (Number(v) * 100).toFixed(1) + '%';
+
+          return `
+            <details class="details-summary" open>
+              <summary>What am I seeing?</summary>
+              <div class="body">The book: every reported premium and claim line that has landed, by coverholder. Completeness shows who has and hasn't reported the latest month — a coverholder whose file is stuck in quarantine shows as behind until it's resolved. Loss ratio is incurred claims over premium.</div>
+            </details>
+            <div class="strip">
+              <div><div class="lbl">Gross Written Premium</div><div class="big brand">${formatMoney(Number(t.gwp))}</div></div>
+              <div><div class="lbl">Incurred Claims</div><div class="big">${formatMoney(Number(t.incurred))}</div></div>
+              <div><div class="lbl">Premium Lines</div><div class="big">${t.lines || 0}</div></div>
+              <div><div class="lbl">Coverholders</div><div class="big">${t.coverholders || 0}</div></div>
+            </div>
+
+            <div class="grid2">
+              <div>
+                <h2 style="margin-top:0">Coverholders</h2>
+                <table>
+                  <thead><tr><th>Name</th><th class="num">Lines</th><th class="num">GWP</th><th class="num">Months</th></tr></thead>
+                  <tbody>
+                    ${per.map(ch => `
+                      <tr>
+                        <td style="font-weight:600">${escapeHtml(ch.coverholder_name)}</td>
+                        <td class="num">${ch.lines || 0}</td>
+                        <td class="num">${formatMoney(Number(ch.gwp))}</td>
+                        <td class="num">${ch.months || 0}</td>
+                      </tr>`).join('')}
+                  </tbody>
+                </table>
+              </div>
+              <div>
+                <h2 style="margin-top:0">Completeness — who hasn't reported</h2>
+                <table>
+                  <thead><tr><th>Coverholder</th><th class="num">Months</th><th>Latest</th><th>Status</th></tr></thead>
+                  <tbody>
+                    ${comp.map(c => `
+                      <tr>
+                        <td style="font-weight:600">${escapeHtml(c.coverholder_name)}</td>
+                        <td class="num">${c.months_received}</td>
+                        <td>${c.last_month}</td>
+                        <td><span class="chip ${isBehind(c.behind) ? 'differs' : 'active'}">${isBehind(c.behind) ? 'behind' : 'up to date'}</span></td>
+                      </tr>`).join('')}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            <div class="card" style="margin-top:18px">
+              <h2 style="margin-top:0">Loss ratio by coverholder</h2>
+              <table>
+                <thead><tr><th>Coverholder</th><th class="num">GWP</th><th class="num">Incurred</th><th class="num">Loss ratio</th></tr></thead>
+                <tbody>
+                  ${loss.map(l => `
+                    <tr>
+                      <td style="font-weight:600">${escapeHtml(l.coverholder_name)}</td>
+                      <td class="num">${formatMoney(Number(l.gwp))}</td>
+                      <td class="num">${formatMoney(Number(l.incurred))}</td>
+                      <td class="num"><span class="chip ${Number(l.loss_ratio) >= 0.75 ? 'differs' : 'active'}">${pct(l.loss_ratio)}</span></td>
+                    </tr>`).join('')}
+                </tbody>
+              </table>
+            </div>
+          `;
+        } catch(e) {
+          return `<div class="error-banner">Failed to load book: ${escapeHtml(e.message)}</div>`;
+        }
+      },
+
+      async lineage() {
+        return `
+          <details class="details-summary" open>
+            <summary>What am I seeing?</summary>
+            <div class="body">Trace how a single line from the book flows back through schema versions, extraction logic, and source documents—see exactly which cell in which file generated each number.</div>
+          </details>
+          <div class="card">
+            <h2>Trace a line</h2>
+            <div style="display:flex;gap:10px;margin-top:12px">
+              <input type="text" id="lineIdInput" aria-label="Bordereau line id to trace" placeholder="Enter bordereau line ID" style="flex:1;padding:9px;border:1px solid var(--line2);border-radius:8px">
+              <button class="act" id="traceBtn">Trace</button>
+            </div>
+            <div id="lineageResult" style="margin-top:18px"></div>
+          </div>
+          <script>
+            document.getElementById('traceBtn')?.addEventListener('click', async () => {
+              const lineId = document.getElementById('lineIdInput').value.trim();
+              if(!lineId) return;
+              try {
+                const result = await fetchJSON('/api/lineage/' + lineId);
+                const {chain = [], download_url = ''} = result;
+
+                let html = '<div class="lin">';
+                chain.forEach((item, i) => {
+                  html += \`
+                    <div class="node">
+                      <div style="font-size:9px;color:var(--mut);font-weight:700;text-transform:uppercase">\${escapeHtml(item.type || 'Unknown')}</div>
+                      <div style="margin-top:2px">\${escapeHtml(item.label)}</div>
+                      \${item.detail ? \`<div style="font-size:11px;color:var(--mut);margin-top:2px">\${escapeHtml(item.detail)}</div>\` : ''}
+                    </div>
+                  \`;
+                  if(i < chain.length - 1) html += '<div class="arr">→</div>';
+                });
+                if(download_url) {
+                  html += \`<a href="\${escapeHtml(download_url)}" class="assetlink" target="_blank">Download ↗</a>\`;
+                }
+                html += '</div>';
+                document.getElementById('lineageResult').innerHTML = html;
+              } catch(e) {
+                toast('Error: ' + e.message);
+              }
+            });
+          <\/script>
+        `;
+      },
+
+      async templates() {
+        try {
+          const data = await fetchJSON('/api/templates');
+          const templates = data.templates || [];
+
+          // Extract unique counterparties for selector
+          const counterparties = [...new Set(templates.map(t => t.counterparty))];
+          const defaultCounterparty = counterparties.includes('Harbourline Underwriting') ? 'Harbourline Underwriting' : (counterparties[0] || '');
+
+          return `
+            <details class="details-summary" open>
+              <summary>What am I seeing?</summary>
+              <div class="body">A history of learned schemas: which counterparty & document type pairs we know, who approved each version, and how field mappings and premium impact have evolved.</div>
+            </details>
+            <div class="card">
+              <h2>Schemas Learned</h2>
+              <table>
+                <thead><tr>
+                  <th>Counterparty</th><th>Document Type</th><th>Version</th><th>Fields</th><th>Created By</th><th>Created At</th>
+                </tr></thead>
+                <tbody>
+                  ${templates.map(t => `
+                    <tr class="row" data-counterparty="${escapeAttr(t.counterparty)}" data-family="${escapeAttr(t.doc_family)}" data-click="showHistory">
+                      <td>${escapeHtml(t.counterparty)}</td>
+                      <td>${escapeHtml(t.doc_family)}</td>
+                      <td><span class="chip">${t.version}</span></td>
+                      <td class="num">${t.field_count}</td>
+                      <td>${t.created_by}</td>
+                      <td>${new Date(t.created_at).toLocaleDateString()}</td>
+                    </tr>
+                  `).join('')}
+                </tbody>
+              </table>
+            </div>
+            <div id="historyDetail"></div>
+
+            <div class="card" style="margin-top:18px">
+              <h2>Version History & Money Impact</h2>
+              <div style="display:flex;gap:12px;margin-top:12px">
+                <select id="impactCounterparty" style="flex:1;padding:9px;border:1px solid var(--line2);border-radius:8px;font:13px system-ui">
+                  ${counterparties.map(cp => `<option value="${escapeAttr(cp)}" ${cp === defaultCounterparty ? 'selected' : ''}>${escapeHtml(cp)}</option>`).join('')}
+                </select>
+                <input type="text" id="impactPeriod" aria-label="Reporting period (YYYY-MM)" placeholder="YYYY-MM" value="2026-06" style="flex:0.5;padding:9px;border:1px solid var(--line2);border-radius:8px;font:13px system-ui">
+                <button class="act" id="showImpactBtn">Show</button>
+              </div>
+              <div id="impactResult" style="margin-top:18px"></div>
+            </div>
+
+            <script>
+              document.querySelectorAll('[data-click="showHistory"]').forEach(row => {
+                row.addEventListener('click', async () => {
+                  const counterparty = row.dataset.counterparty;
+                  const family = row.dataset.family;
+                  try {
+                    const result = await fetchJSON(\`/api/template/history?counterparty=\${encodeURIComponent(counterparty)}&family=\${encodeURIComponent(family)}\`);
+                    const versions = result.versions || [];
+
+                    let html = \`<div class="card" style="margin-top:18px"><h2>Version History</h2><table><thead><tr><th>Version</th><th>Created By</th><th>Created At</th></tr></thead><tbody>\`;
+                    versions.forEach(v => {
+                      html += \`<tr><td style="font-weight:600">v\${v.version}</td><td>\${v.created_by}</td><td>\${new Date(v.created_at).toLocaleDateString()}</td></tr>\`;
+                    });
+                    html += '</tbody></table></div>';
+                    document.getElementById('historyDetail').innerHTML = html;
+                  } catch(e) {
+                    toast('Error: ' + e.message);
+                  }
+                });
+              });
+
+              document.getElementById('showImpactBtn')?.addEventListener('click', async () => {
+                const counterparty = document.getElementById('impactCounterparty').value;
+                const period = document.getElementById('impactPeriod').value;
+                if(!counterparty || !period) {
+                  toast('Please fill in counterparty and period');
+                  return;
+                }
+                try {
+                  const result = await fetchJSON(\`/api/versions?counterparty=\${encodeURIComponent(counterparty)}&period=\${encodeURIComponent(period)}\`);
+                  const {versions = [], impact = null} = result;
+
+                  let html = \`<table style="width:100%;font-size:13px;border-collapse:collapse;margin-bottom:16px">
+                    <thead style="background:#f8fafc">
+                      <tr>
+                        <th style="padding:9px 12px;text-align:left;font-weight:700;font-size:10.5px;text-transform:uppercase;letter-spacing:.07em;color:var(--mut);border-bottom:1px solid var(--line)">File</th>
+                        <th style="padding:9px 12px;text-align:left;font-weight:700;font-size:10.5px;text-transform:uppercase;letter-spacing:.07em;color:var(--mut);border-bottom:1px solid var(--line)">Status</th>
+                        <th style="padding:9px 12px;text-align:right;font-weight:700;font-size:10.5px;text-transform:uppercase;letter-spacing:.07em;color:var(--mut);border-bottom:1px solid var(--line)">Lines</th>
+                        <th style="padding:9px 12px;text-align:right;font-weight:700;font-size:10.5px;text-transform:uppercase;letter-spacing:.07em;color:var(--mut);border-bottom:1px solid var(--line)">GWP</th>
+                      </tr>
+                    </thead>
+                    <tbody>\`;
+
+                  versions.forEach(v => {
+                    html += \`
+                      <tr style="border-bottom:1px solid var(--line)">
+                        <td style="padding:9px 12px">\${escapeHtml(v.file_name)}</td>
+                        <td style="padding:9px 12px"><span class="chip \${v.status}">\${v.status}</span></td>
+                        <td style="padding:9px 12px;text-align:right;font-variant-numeric:tabular-nums">\${v.lines || 0}</td>
+                        <td style="padding:9px 12px;text-align:right;font-variant-numeric:tabular-nums">\${formatMoney(v.gross_premium, 'GBP')}</td>
+                      </tr>
+                    \`;
+                  });
+                  html += '</tbody></table>';
+
+                  if(impact) {
+                    const delta = impact.new_gross_premium - impact.old_gross_premium;
+                    const deltaClass = delta > 0 ? 'pos' : delta < 0 ? 'neg' : '';
+                    html += \`
+                      <div class="banner">
+                        <strong>Premium Impact</strong>
+                        <div style="margin-top:8px;font-size:14px">
+                          <strong>\${escapeHtml(impact.old_doc)}</strong> → <strong>\${escapeHtml(impact.new_doc)}</strong>
+                        </div>
+                        <div style="margin-top:8px;display:flex;gap:24px">
+                          <div>
+                            <div style="font-size:11px;color:var(--mut);text-transform:uppercase;font-weight:700">Old GWP</div>
+                            <div style="font-size:18px;font-weight:800;font-variant-numeric:tabular-nums">\${formatMoney(impact.old_gross_premium, 'GBP')}</div>
+                          </div>
+                          <div>
+                            <div style="font-size:11px;color:var(--mut);text-transform:uppercase;font-weight:700">New GWP</div>
+                            <div style="font-size:18px;font-weight:800;font-variant-numeric:tabular-nums">\${formatMoney(impact.new_gross_premium, 'GBP')}</div>
+                          </div>
+                          <div>
+                            <div style="font-size:11px;color:var(--mut);text-transform:uppercase;font-weight:700">Delta</div>
+                            <div style="font-size:18px;font-weight:800;font-variant-numeric:tabular-nums;color:var(--\${deltaClass || 'ink'})">\${formatMoney(delta, 'GBP')}</div>
+                          </div>
+                        </div>
+                      </div>
+                    \`;
+                  }
+
+                  document.getElementById('impactResult').innerHTML = html;
+                } catch(e) {
+                  toast('Error: ' + e.message);
+                }
+              });
+            <\/script>
+          `;
+        } catch(e) {
+          return `<div class="error-banner">Failed to load templates: ${escapeHtml(e.message)}</div>`;
+        }
+      },
+
+      async ask() {
+        const examples = [
+          "Which coverholder has the highest gross written premium?",
+          "How many premium lines did each coverholder report by month?",
+          "Which coverholders reported in 2026-07?"
+        ];
+
+        return `
+          <details class="details-summary" open>
+            <summary>What am I seeing?</summary>
+            <div class="body">Ask questions about the book and let AI analyze the data. This surface connects to our governed analytics space, so every answer comes with lineage and auditability.</div>
+          </details>
+          <div class="card">
+            <h2>Ask the Book</h2>
+            <div style="display:flex;gap:10px;margin-top:12px">
+              <input type="text" id="askInput" aria-label="Ask a question about the book" placeholder="Ask a question about the book..." style="flex:1;padding:9px;border:1px solid var(--line2);border-radius:8px">
+              <button class="act" id="askBtn">Ask</button>
+            </div>
+
+            <h3 style="margin-top:16px">Example questions</h3>
+            <div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:8px">
+              ${examples.map(ex => `
+                <button class="chipq" data-example="${escapeAttr(ex)}">${escapeHtml(ex)}</button>
+              `).join('')}
+            </div>
+
+            <div id="askResult" style="margin-top:18px"></div>
+          </div>
+
+          <script>
+            document.querySelectorAll('[data-example]').forEach(btn => {
+              btn.addEventListener('click', () => {
+                document.getElementById('askInput').value = btn.dataset.example;
+              });
+            });
+
+            document.getElementById('askBtn')?.addEventListener('click', async () => {
+              const question = document.getElementById('askInput').value.trim();
+              if(!question) {
+                toast('Please enter a question');
+                return;
+              }
+
+              try {
+                const result = await fetchJSON('/api/ask', {method: 'POST', body: {question}});
+                const {answer = '', sql = '', rows = []} = result;
+
+                let html = '';
+                if(answer) {
+                  html += \`<div class="card"><h3 style="margin-top:0">Answer</h3><p style="margin:0;font-size:13px;line-height:1.6">\${escapeHtml(answer)}</p></div>\`;
+                }
+                if(sql) {
+                  html += \`<div class="card"><h3 style="margin-top:0">Generated SQL</h3><pre style="background:#f8fafc;padding:12px;border-radius:8px;overflow-x:auto;font:12px ui-monospace,Menlo,monospace;margin:0;color:var(--slate2)">\${escapeHtml(sql)}</pre></div>\`;
+                }
+                if(rows && rows.length > 0) {
+                  html += \`<div class="card"><table style="width:100%;font-size:13px;border-collapse:collapse">\`;
+                  rows.forEach((row, i) => {
+                    if(i === 0) {
+                      html += \`<thead style="background:#f8fafc"><tr>\`;
+                      row.forEach(cell => {
+                        html += \`<th style="padding:9px 12px;text-align:left;font-weight:700;font-size:10.5px;text-transform:uppercase;letter-spacing:.07em;color:var(--mut);border-bottom:1px solid var(--line)">\${escapeHtml(String(cell))}</th>\`;
+                      });
+                      html += '</tr></thead><tbody>';
+                    } else {
+                      html += '<tr style="border-bottom:1px solid var(--line)">';
+                      row.forEach(cell => {
+                        html += \`<td style="padding:9px 12px">\${escapeHtml(String(cell))}</td>\`;
+                      });
+                      html += '</tr>';
+                    }
+                  });
+                  html += '</tbody></table></div>';
+                }
+
+                document.getElementById('askResult').innerHTML = html || '<div class="mut">No response from API</div>';
+              } catch(e) {
+                if(e.message.includes('400')) {
+                  document.getElementById('askResult').innerHTML = '<div class="banner" style="background:#fef3c7;border:1px solid #fde68a;color:#92400e">Ask-the-gateway is being provisioned. Check back in a few moments.</div>';
+                } else {
+                  toast('Error: ' + e.message);
+                  document.getElementById('askResult').innerHTML = '';
+                }
+              }
+            });
+          <\/script>
+        `;
+      },
+
+      async learn() {
+        try {
+          const data = await fetchJSON('/api/learn');
+          const cards = data.cards || [];
+
+          // Group by band
+          const grouped = {};
+          cards.forEach(c => {
+            if(!grouped[c.band]) grouped[c.band] = [];
+            grouped[c.band].push(c);
+          });
+
+          const bands = Object.keys(grouped);
+
+          return `
+            <details class="details-summary" open>
+              <summary>What am I seeing?</summary>
+              <div class="body">How the Document Gateway works: each step is a real workflow in the platform, linked to the tables and functions that power it. Click a step to see the underlying mechanism.</div>
+            </details>
+            ${bands.map(band => `
+              <div class="card">
+                <h2>${escapeHtml(band)}</h2>
+                <div class="jflow">
+                  ${grouped[band].map((card, i) => `
+                    <div class="jgroup">
+                      <div class="gl">${escapeHtml(card.activity)}</div>
+                      <div style="font-size:13px;color:var(--ink);margin-bottom:8px">${escapeHtml(card.how)}</div>
+                      ${card.links && card.links.length > 0 ? `
+                        <div style="display:flex;flex-direction:column;gap:6px;margin-top:8px">
+                          ${card.links.map(link => `
+                            <a href="${escapeAttr(link.url)}" target="_blank" class="assetlink">
+                              ${escapeHtml(link.label)} ${link.external ? '↗' : '→'}
+                            </a>
+                          `).join('')}
+                        </div>
+                      ` : ''}
+                    </div>
+                  `).join('')}
+                </div>
+              </div>
+            `).join('')}
+          `;
+        } catch(e) {
+          return `<div class="error-banner">Failed to load Learn: ${escapeHtml(e.message)}</div>`;
+        }
+      },
+
+      async audit() {
+        try {
+          const data = await fetchJSON('/api/audit?limit=50');
+          const events = data.events || [];
+
+          return `
+            <details class="details-summary" open>
+              <summary>What am I seeing?</summary>
+              <div class="body">A complete audit trail of all decisions made in the Document Gateway: who approved which mappings, when, and why. This is your governance record.</div>
+            </details>
+            <div class="card">
+              <h2>Audit Trail</h2>
+              <table>
+                <thead><tr>
+                  <th>Created</th><th>Event Type</th><th>Entity Type</th><th>Entity ID</th><th>Actor</th><th>Detail</th>
+                </tr></thead>
+                <tbody>
+                  ${events.map(e => `
+                    <tr style="border-bottom:1px solid var(--line)">
+                      <td style="padding:9px 12px;font-size:13px">${new Date(e.created_at).toLocaleString()}</td>
+                      <td style="padding:9px 12px"><span class="chip ${e.event_type}">${e.event_type}</span></td>
+                      <td style="padding:9px 12px;font-size:13px">${escapeHtml(e.entity_type)}</td>
+                      <td style="padding:9px 12px;font-size:13px;font-weight:600">${escapeHtml(e.entity_id)}</td>
+                      <td style="padding:9px 12px;font-size:13px">${escapeHtml(e.actor)}</td>
+                      <td style="padding:9px 12px;font-size:13px;color:var(--mut)">${escapeHtml(e.detail || '—')}</td>
+                    </tr>
+                  `).join('')}
+                </tbody>
+              </table>
+            </div>
+          `;
+        } catch(e) {
+          return `<div class="error-banner">Failed to load audit: ${escapeHtml(e.message)}</div>`;
+        }
+      }
+    };
+
+    // Render nav
+    function renderNav() {
+      const hash = (window.location.hash || '#home').slice(1).split('?')[0];
+      const nav = document.getElementById('nav');
+      const flow = flowForView(hash);
+      if (!flow) {  // landing — no scoped nav
+        nav.innerHTML = '';
+        return;
+      }
+      const fl = FLOWS[flow];
+      nav.innerHTML = `
+        <a href="#home" class="nav-a" style="opacity:.8"><span class="ic">⌂</span><span>All flows</span></a>
+        <div style="font-size:11px;font-weight:700;color:#94a3b8;text-transform:uppercase;letter-spacing:.08em;margin:14px 12px 6px">${escapeHtml(fl.short)}</div>
+        ${fl.views.map(item => `
+          <a href="#${item.id}" class="nav-a ${hash === item.id ? 'active' : ''}">
+            <span class="ic">${item.icon}</span>
+            <span>${item.label}</span>
+          </a>
+        `).join('')}
+      `;
+    }
+
+    // Escape HTML
+    function escapeHtml(str) {
+      if(!str) return '';
+      const div = document.createElement('div');
+      div.textContent = str;
+      return div.innerHTML;
+    }
+
+    function escapeAttr(str) {
+      if(!str) return '';
+      return str.replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+    }
+
+    // Main render
+    async function render() {
+      renderNav();
+      const hash = (window.location.hash || '#home').slice(1).split('?')[0];
+      const viewFn = views[hash] || views.home;
+      const app = document.getElementById('app');
+      app.innerHTML = '<div style="position:relative"><span class="spin"></span></div>';
+      try {
+        const html = await viewFn();
+        app.innerHTML = html;
+        // Scripts injected via innerHTML do not execute — re-create them so view
+        // event handlers actually run.
+        app.querySelectorAll('script').forEach(old => {
+          const s = document.createElement('script');
+          s.textContent = old.textContent;
+          old.replaceWith(s);
+        });
+      } catch(e) {
+        app.innerHTML = `<div class="error-banner">Error loading view: ${escapeHtml(e.message)}</div>`;
+      }
+    }
+
+    // Mode toggle
+    document.getElementById('modeBtn')?.addEventListener('click', () => {
+      MODE = MODE === 'cached' ? 'live' : 'cached';
+      const btn = document.getElementById('modeBtn');
+      btn.className = 'pill ' + MODE;
+      btn.textContent = MODE.toUpperCase();
+    });
+
+    // Router
+    window.addEventListener('hashchange', render);
+    render();
+
+    // Footer disclaimer
+    const footer = document.createElement('footer');
+    footer.style.cssText = 'padding:32px;text-align:center;font-size:11px;color:var(--mut);border-top:1px solid var(--line);margin-top:60px';
+    footer.innerHTML = `<strong>About this demo.</strong> Bricksurance is a fictional insurance group and all coverholders, carriers and figures here are synthetic. The MRC tenant uses real, publicly-known market names for realism, but all insureds and figures are invented. The method is illustrative. Every screen reads a real governed Unity Catalog table, view, or function.`;
+    document.querySelector('.content')?.parentElement?.appendChild(footer);
+  </script>
+</body>
+</html>

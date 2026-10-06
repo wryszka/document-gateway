@@ -1,0 +1,292 @@
+{
+  "_comment": "Market Reform Contract tenant. Prose family laid out to the MRC v3 sections; the deterministic path anchors on those section headings and field labels; the AI path is dictionary-constrained ai_query over the ai_parse_document text. Both land in the SHARED assertion graph; mrc_entities + mrc_extraction + mrc_certainty_check are the working surface. Each expected data point carries an ACORD binding AND an indicative Lloyd's Core Data Record (CDR) field — a paraphrased crosswalk for discussion, not the published CDR specification. Real syndicate numbers/managing agents (verified 2026-10-06); broker numbers illustrative; insureds invented (DECISIONS D9).",
+  "tenant": "mrc",
+  "label": "Market Reform Contract",
+  "subtitle": "Lloyd's MRC v3 · open-market placement",
+  "families": {
+    "mrc": {
+      "kind": "prose",
+      "projection": "mrc_entities",
+      "node_label": "Policy"
+    }
+  },
+  "section_anchors": {
+    "_comment": "MRC v3 section headings, in document order.",
+    "header": "MARKET REFORM CONTRACT",
+    "risk_details": "RISK DETAILS",
+    "information": "INFORMATION",
+    "security": "SECURITY DETAILS",
+    "subscription": "SUBSCRIPTION AGREEMENT",
+    "fiscal": "FISCAL AND REGULATORY",
+    "remuneration": "BROKER REMUNERATION AND DEDUCTIONS"
+  },
+  "schema_name": "Lloyd's MRC (ACORD)",
+  "expected_data_points": [
+    {
+      "key": "umr",
+      "label": "Unique Market Reference (UMR)",
+      "entity": "Policy",
+      "attribute": "umr",
+      "section": "RISK DETAILS",
+      "core": true,
+      "cdr": "Unique Market Reference"
+    },
+    {
+      "key": "policy_number",
+      "label": "Broker reference",
+      "entity": "Policy",
+      "attribute": "policy_number",
+      "section": "Contract header",
+      "core": false,
+      "cdr": "Broker contract reference"
+    },
+    {
+      "key": "broker_name",
+      "label": "Placing broker",
+      "entity": "Broker",
+      "attribute": "name",
+      "section": "Contract header",
+      "core": true,
+      "cdr": "Placing broker"
+    },
+    {
+      "key": "broker_number",
+      "label": "Lloyd's broker number",
+      "entity": "Broker",
+      "attribute": "broker_code",
+      "section": "Contract header",
+      "core": false,
+      "cdr": "Broker number"
+    },
+    {
+      "key": "class_of_business",
+      "label": "Type (class of business)",
+      "entity": "Policy",
+      "attribute": "class_of_business",
+      "section": "RISK DETAILS",
+      "core": true,
+      "cdr": "Class of business"
+    },
+    {
+      "key": "insured_name",
+      "label": "Insured",
+      "entity": "Insured",
+      "attribute": "name",
+      "section": "RISK DETAILS",
+      "core": true,
+      "cdr": "Insured name"
+    },
+    {
+      "key": "inception_date",
+      "label": "Inception date",
+      "entity": "Policy",
+      "attribute": "inception_date",
+      "section": "RISK DETAILS",
+      "core": true,
+      "cdr": "Period start date"
+    },
+    {
+      "key": "expiry_date",
+      "label": "Expiry date",
+      "entity": "Policy",
+      "attribute": "expiry_date",
+      "section": "RISK DETAILS",
+      "core": true,
+      "cdr": "Period end date"
+    },
+    {
+      "key": "situation",
+      "label": "Situation / territory",
+      "entity": "RiskLocation",
+      "attribute": "country_code",
+      "section": "RISK DETAILS",
+      "core": false,
+      "cdr": "Risk location"
+    },
+    {
+      "key": "headline_limit",
+      "label": "Limit of liability",
+      "entity": "Limit",
+      "attribute": "amount",
+      "section": "RISK DETAILS",
+      "core": true,
+      "cdr": "Limit amount and currency"
+    },
+    {
+      "key": "deductible_text",
+      "label": "Deductible",
+      "entity": "Deductible",
+      "attribute": "amount",
+      "section": "RISK DETAILS",
+      "core": false,
+      "cdr": "Deductible / excess"
+    },
+    {
+      "key": "premium_text",
+      "label": "Premium",
+      "entity": "Premium",
+      "attribute": "amount",
+      "section": "RISK DETAILS",
+      "core": true,
+      "cdr": "Premium amount and currency"
+    },
+    {
+      "key": "clauses",
+      "label": "Conditions (clause references)",
+      "entity": "Clause",
+      "attribute": "clause_id",
+      "section": "RISK DETAILS",
+      "core": false,
+      "cdr": "Clause references",
+      "list": true
+    },
+    {
+      "key": "exclusions",
+      "label": "Exclusions",
+      "entity": "Exclusion",
+      "attribute": "title",
+      "section": "RISK DETAILS",
+      "core": false,
+      "cdr": null,
+      "list": true
+    },
+    {
+      "key": "choice_of_law",
+      "label": "Choice of law and jurisdiction",
+      "entity": "Placement",
+      "attribute": "choice_of_law",
+      "section": "RISK DETAILS",
+      "core": false,
+      "cdr": "Governing law and jurisdiction"
+    },
+    {
+      "key": "insurers",
+      "label": "Security — syndicates and lines",
+      "entity": "Insurer",
+      "attribute": "syndicate_number",
+      "section": "SECURITY DETAILS",
+      "core": true,
+      "cdr": "Carrier (syndicate) and line share",
+      "list": true
+    },
+    {
+      "key": "signed_lines_total",
+      "label": "Signed lines total",
+      "entity": "Placement",
+      "attribute": "signed_lines_total",
+      "section": "SECURITY DETAILS",
+      "core": true,
+      "cdr": "Signed line share"
+    },
+    {
+      "key": "slip_leader",
+      "label": "Slip leader",
+      "entity": "Placement",
+      "attribute": "slip_leader",
+      "section": "SUBSCRIPTION AGREEMENT",
+      "core": true,
+      "cdr": "Lead carrier"
+    },
+    {
+      "key": "settlement_due_date",
+      "label": "Settlement due date",
+      "entity": "Placement",
+      "attribute": "settlement_due_date",
+      "section": "SUBSCRIPTION AGREEMENT",
+      "core": false,
+      "cdr": "Settlement due date"
+    },
+    {
+      "key": "country_of_origin",
+      "label": "Country of origin",
+      "entity": "Placement",
+      "attribute": "country_of_origin",
+      "section": "FISCAL AND REGULATORY",
+      "core": false,
+      "cdr": "Country of origin (fiscal)"
+    },
+    {
+      "key": "regulatory_class",
+      "label": "Regulatory client classification",
+      "entity": "Placement",
+      "attribute": "regulatory_classification",
+      "section": "FISCAL AND REGULATORY",
+      "core": false,
+      "cdr": "Regulatory classification"
+    },
+    {
+      "key": "brokerage",
+      "label": "Total brokerage",
+      "entity": "Placement",
+      "attribute": "total_brokerage_pct",
+      "section": "BROKER REMUNERATION AND DEDUCTIONS",
+      "core": false,
+      "cdr": "Brokerage"
+    }
+  ],
+  "dictionary_extensions": {
+    "_comment": "The base dictionary already has Policy/Insured/Broker/Insurer/Limit/Deductible/Premium/Clause/Exclusion/RiskLocation. The MRC tenant adds Placement — the subscription-market facts of the contract.",
+    "entities": {
+      "Placement": {
+        "description": "The subscription-market facts of a Lloyd's placement: security, signing, lead, settlement, fiscal and remuneration terms.",
+        "attributes": [
+          "choice_of_law",
+          "signed_lines_total",
+          "slip_leader",
+          "settlement_due_date",
+          "country_of_origin",
+          "regulatory_classification",
+          "total_brokerage_pct"
+        ]
+      }
+    },
+    "relationships": {
+      "HAS_PLACEMENT": {
+        "source": "Policy",
+        "target": "Placement",
+        "description": "The placement terms of the contract."
+      },
+      "SUBSCRIBED_BY": {
+        "source": "Placement",
+        "target": "Insurer",
+        "description": "A syndicate writing a line on the placement."
+      }
+    }
+  },
+  "projections": {
+    "mrc_entities": {
+      "table": "mrc_entities",
+      "_comment": "One row per MRC: headline facts + numeric metrics + certainty status. Per-data-point values with source quotes live in mrc_extraction; check results in mrc_certainty_check."
+    }
+  },
+  "certainty_checks": [
+    {
+      "id": "signed_100",
+      "label": "Signed lines total 100% of the order"
+    },
+    {
+      "id": "several_liability",
+      "label": "Several liability notice (LSW1001) present"
+    },
+    {
+      "id": "sanctions",
+      "label": "Sanctions clause (LMA5218) present"
+    },
+    {
+      "id": "period_valid",
+      "label": "Period valid — expiry after inception, 12 months"
+    },
+    {
+      "id": "umr_format",
+      "label": "UMR well-formed and matches the broker number"
+    },
+    {
+      "id": "leader_on_security",
+      "label": "Slip leader is on the security"
+    },
+    {
+      "id": "law_stated",
+      "label": "Choice of law and jurisdiction stated"
+    }
+  ]
+}
