@@ -25,9 +25,15 @@ RULES = ("Use ONLY the facts provided — never invent documents, numbers or nam
          "and why), then '### Suggested next steps' as bullet points. Keep it under 250 words.")
 
 
-def _llm(cfg, prompt):
+def _llm(cfg, prompt, cache=None):
+    """cache: the app's CACHED-mode store — the same facts get the same advice, instantly."""
+    if cache is not None and ("agent", prompt) in cache:
+        return cache[("agent", prompt)], True
     out = sql("SELECT ai_query(:ep, :p)", params={"ep": cfg["models"]["narrate"], "p": prompt}, cfg=cfg)
-    return (out[0][0] or "").strip()
+    text = (out[0][0] or "").strip()
+    if cache is not None and text:
+        cache[("agent", prompt)] = text
+    return text, False
 
 
 def _log(cfg, agent, subject, facts, output, actor):
@@ -77,17 +83,17 @@ def intake_facts(cfg):
     }
 
 
-def intake_review(cfg, actor="presenter"):
+def intake_review(cfg, actor="presenter", cache=None):
     facts = intake_facts(cfg)
     prompt = ("You are the intake review agent for a Lloyd's Market Reform Contract gateway. Review today's intake "
               "and tell the operations lead what landed and what needs a person. " + RULES +
               "\n\nFACTS:\n" + json.dumps(facts, indent=1, default=str))
-    out = _llm(cfg, prompt)
+    out, cached = _llm(cfg, prompt, cache)
     nid = _log(cfg, "intake_review", "MRC intake", facts, out, actor)
-    return {"note_id": nid, "review": out, "facts": facts}
+    return {"note_id": nid, "review": out, "facts": facts, "cached": cached}
 
 
-def schema_review(cfg, kind, payload, actor="presenter"):
+def schema_review(cfg, kind, payload, actor="presenter", cache=None):
     """kind='recognition': payload = proposed schema (name, fields with bindings/confidence).
     kind='changes': payload = the diff and the decisions the person has selected."""
     if kind == "recognition":
@@ -100,7 +106,7 @@ def schema_review(cfg, kind, payload, actor="presenter"):
                 "accepts it. Check: whether each rename keeps the same meaning; whether any mapping points at the wrong "
                 "field; which accepted gaps matter for contract certainty or the Core Data Record; what to ask the broker.")
     prompt = task + " " + RULES + "\n\nFACTS:\n" + json.dumps(payload, indent=1, default=str)[:15000]
-    out = _llm(cfg, prompt)
+    out, cached = _llm(cfg, prompt, cache)
     subject = payload.get("file_name") or payload.get("name") or kind
     nid = _log(cfg, "schema_review", f"{kind}: {subject}", payload, out, actor)
-    return {"note_id": nid, "review": out}
+    return {"note_id": nid, "review": out, "cached": cached}

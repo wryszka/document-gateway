@@ -7,6 +7,7 @@ SPA. Runs in Databricks Apps on the app service principal.
 """
 from __future__ import annotations
 
+import threading
 import json
 import os
 import sys
@@ -427,7 +428,7 @@ def mrc_contracts():
         f"""SELECT e.mrc_id, e.umr, e.insured_name, e.class_of_business, e.broker_name, e.slip_leader,
                    e.premium_currency, e.premium_amount, e.signed_lines_total, e.checks_failed, e.certainty_status,
                    e.schema_name, e.schema_version, e.inception_date, e.expiry_date,
-                   (SELECT first(x.source_quote) FROM {F}.v_mrc_extraction_latest x
+                   (SELECT max(x.source_quote) FROM {F}.v_mrc_extraction_latest x
                      WHERE x.mrc_id = e.mrc_id AND x.data_point = 'insurers') AS syndicates
             FROM {F}.v_mrc_entities_latest e ORDER BY e.umr""",
         ["mrc_id", "umr", "insured_name", "class_of_business", "broker_name", "slip_leader", "premium_currency",
@@ -468,22 +469,23 @@ def mrc_contract(mrc_id: str):
 
 
 @app.post("/api/mrc/agent/intake_review")
-def mrc_agent_intake(body: dict = Body(default={})):
+def mrc_agent_intake(body: dict = Body(default={}), mode: str = "live"):
     """Intake review agent: reads the computed intake facts and advises. Logged; never acts."""
     try:
-        return ma.intake_review(CFG, actor=body.get("actor", "presenter"))
+        return ma.intake_review(CFG, actor=body.get("actor", "presenter"), cache=_AI_CACHE if mode == "cached" else None)
     except Exception as e:
         raise HTTPException(500, f"Agent unavailable: {e}")
 
 
 @app.post("/api/mrc/agent/schema_review")
-def mrc_agent_schema(body: dict = Body(...)):
+def mrc_agent_schema(body: dict = Body(...), mode: str = "live"):
     """Schema review agent: critiques a proposed schema or amendment before a person records it."""
     kind = body.get("kind")
     if kind not in ("recognition", "changes"):
         raise HTTPException(400, "kind must be recognition or changes")
     try:
-        return ma.schema_review(CFG, kind, body.get("payload") or {}, actor=body.get("actor", "presenter"))
+        return ma.schema_review(CFG, kind, body.get("payload") or {}, actor=body.get("actor", "presenter"),
+                                cache=_AI_CACHE if mode == "cached" else None)
     except Exception as e:
         raise HTTPException(500, f"Agent unavailable: {e}")
 
@@ -649,21 +651,22 @@ def mrc_pdf(doc_id: str):
 
 
 _MRC_JOB = {"running": False, "result": None, "kind": None, "error": None}
+_MRC_JOB_LOCK = threading.Lock()
 
 
 def _start_job(kind, fn):
     """Run one MRC action in the background. Only one runs at a time (intake, recognise,
     accept-changes and reset can never overlap)."""
-    import threading
-    if _MRC_JOB["running"]:
-        raise HTTPException(409, "Another step is still running — try again when it finishes")
-    _MRC_JOB.update(running=True, result=None, kind=kind, error=None)
+    with _MRC_JOB_LOCK:  # check-and-set atomically so two clicks can't start two jobs
+        if _MRC_JOB["running"]:
+            raise HTTPException(409, "Another step is still running — try again when it finishes")
+        _MRC_JOB.update(running=True, result=None, kind=kind, error=None)
 
     def run():
         try:
             _MRC_JOB["result"] = fn()
         except Exception as e:  # surfaced on the progress endpoint
-            _MRC_JOB["error"] = str(e)[:300]
+            _MRC_JOB["error"] = str(e)[:1000]
         finally:
             _MRC_JOB["running"] = False
     threading.Thread(target=run, daemon=True).start()
@@ -870,10 +873,19 @@ def mrc_semantics():
             "schema_registered": mrc.schema_registered(CFG)}
 
 
+# CACHED mode (the yellow pill): a model answer already given is replayed instantly so no
+# beat stalls on a model; LIVE always calls the model. In-memory, so it survives a demo reset
+# but not a redeploy — rehearse once after the last deploy.
+_AI_CACHE: dict = {}
+
+
 @app.post("/api/mrc/ask")
-def mrc_ask(body: dict = Body(...)):
+def mrc_ask(body: dict = Body(...), mode: str = "live"):
     """Dual retrieval: Genie over the MRC graph/projection + the Knowledge Assistant over the PDFs."""
     q = body["question"]
+    key = ("ask", q.strip().lower())
+    if mode == "cached" and key in _AI_CACHE:
+        return {**_AI_CACHE[key], "cached": True}
     g = CFG.get("genie", {})
     out = {"question": q, "genie": None, "ka": None}
     space = g.get("mrc_space_id", "")
@@ -890,4 +902,6 @@ def mrc_ask(body: dict = Body(...)):
             out["ka"] = {"error": str(e)}
     if not space and not ka:
         raise HTTPException(400, "MRC ask-surface not configured yet")
+    if not (out["genie"] or {}).get("error") and not (out["ka"] or {}).get("error"):
+        _AI_CACHE[key] = out
     return out

@@ -12,10 +12,11 @@ Format per beat: **GO** (where) · **DO** (the one action) · **SAY** (≤20 wor
 
 1. **Reset to the clean start** — open the app → **1. Market Reform Contract** → **Intake** → **↺ Reset demo** (top right of the Documents card) → Confirm. About half a minute.
    Expected afterwards: **8 documents "Received — not yet read"**, a **Run intake** button, and **1 schema in the repository** (Open Market v1, recorded by "Market data team").
-   The button is disabled while any step is running; steps never overlap.
+   The button is disabled while any step is running; steps never overlap. **Wait for the banner to clear** (8 received + 1 schema showing) before anything else.
    *Fallback (command line, from the repo):* `PYTHONPATH=. uv run --with databricks-sdk,openpyxl python tools/mrc_reset.py --no-regenerate`
 2. **Warm the warehouse** — after the reset, open **Schemas** and **Governance** once (the first query after idle is slow). Do **not** press Run intake.
-3. **Warm Ask** — on **Analytics**, ask one throwaway question (both answers should appear).
+3. **Warm Ask** — on **Analytics**, press each example question you plan to use once (both answers should appear).
+3a. **Leave the MODE switch (bottom left) on yellow CACHED.** In cached mode, an AI answer already given (Ask and the three review agents) is replayed instantly, so no beat waits on a model. LIVE always asks the model. The cache lives in the app's memory: it survives **↺ Reset demo** but not a redeploy. So **do one full rehearsal after the last deploy**, then reset — the agents and Ask answers are then warm for the room.
 4. Keep the app in its own browser window: https://document-gateway-7474656169654171.aws.databricksapps.com → **1. Market Reform Contract**.
 
 **The menu follows the story:** **Intake** (what arrived, what needs attention) → **Schemas** (every schema-reading activity, in tabs: Repository · Recognition · Changes · Vocabulary) → **Contracts** (search any contract; open it for everything about it) → **Analytics** (ask the book) → **Governance** (the questions you'll be asked, answered from the data).
@@ -27,7 +28,7 @@ Format per beat: **GO** (where) · **DO** (the one action) · **SAY** (≤20 wor
 ## Beat 0 — The question (2 min)
 - **GO:** landing page.
 - **DO:** nothing — talk.
-- **SAY:** "A contract arrives as a PDF. How do we read it once, check it, and trust the data downstream?"
+- **SAY:** "A contract arrives as a PDF. Today it is read, keyed and checked by hand — often more than once. How do we read it once, check it against market rules, and trust the data downstream?"
 - **IF ASKED** "why three flows?" — the same engine handles bordereaux and renewal slips; today is MRC only.
 
 ## Beat 1 — What has arrived, and what we already know (1.5 min)
@@ -94,7 +95,8 @@ Format per beat: **GO** (where) · **DO** (the one action) · **SAY** (≤20 wor
 - **GO:** **Governance**.
 - **DO:** open *Who approved each schema, and when?* — then scroll to **Schema approvals** and **Human decisions**; point at the agent reviews you just ran.
 - **SAY:** "The questions an auditor asks — answered from the records, not a slide. Who recorded each schema and when, what loaded with no person, what the AI did and didn't decide, who has access."
-- **CLOSE:** "Open code, your workspace, the same loop for any document the market exchanges." (Full trail: *Audit trail →*.)
+- **CLOSE (the result):** "Five of eight contracts landed with no one touching them. The three exceptions each took one decision, and that decision is now on record, so the next document like it goes straight through. Every value traces to its line in the wording. Open code, your workspace, the same loop for any document the market exchanges." (Full trail: *Audit trail →*.)
+- **IF ASKED** "where does the logic run?" — "The data, schema versions, decisions and audit are governed tables. Reading and Ask are platform services. For this demo the orchestration runs inside the app; in production it moves into scheduled Jobs and Unity Catalog functions, with approvals as platform permissions." (Q&A #13.)
 
 ---
 
@@ -102,6 +104,8 @@ Format per beat: **GO** (where) · **DO** (the one action) · **SAY** (≤20 wor
 Cut 7 (show it inside beat 10) → cut the optional part of 9 → cut 3 (mention the agent in beat 10) → cut 6. Never cut 2, 4, 5, 8.
 
 ## Technical Q&A (likely from this audience)
+The questions that can't be shown on screen (real scanned documents, endorsements, born-digital placements, scale, cost, a wrong mapping, four-eyes approval) have straight answers in **`docs/MRC_DEMO_QA.md` (tab 2)**.
+
 | Question | Answer |
 |---|---|
 | How is a schema recognised? | By fingerprint — the document title plus its section headings. Same fingerprint and every field found → straight through; same fingerprint, fields changed → review; no matching fingerprint → schema recognition. |

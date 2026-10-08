@@ -47,7 +47,7 @@
       <nav class="nav" id="nav"></nav>
       <div class="side-foot">
         <div style="font-size:11px;font-weight:700;color:#cbd5e1;margin-bottom:8px">MODE</div>
-        <button class="pill live" id="modeBtn" style="width:100%;text-align:center;border:none;cursor:pointer;font-weight:700">LIVE</button>
+        <button class="pill cached" id="modeBtn" title="CACHED replays an AI answer already given, instantly; LIVE always asks the model" style="width:100%;text-align:center;border:none;cursor:pointer;font-weight:700">CACHED</button>
       </div>
     </aside>
     <main class="main">
@@ -325,7 +325,7 @@
               var out = document.getElementById('mrcIntakeAgentOut');
               ab.disabled = true; out.innerHTML = '<span class="spin"></span> The agent is reviewing the intake…';
               try { var r = await fetchJSON('/api/mrc/agent/intake_review', {method:'POST', body:{}});
-                    out.innerHTML = md(r.review) + '<div style="font-size:11px;color:var(--mut);margin-top:6px">Logged as ' + escapeHtml(r.note_id) + ' · advises only · see Governance</div>'; }
+                    out.innerHTML = md(r.review) + '<div style="font-size:11px;color:var(--mut);margin-top:6px">Logged as ' + escapeHtml(r.note_id) + (r.cached ? ' · replayed from cache' : '') + ' · advises only · see Governance</div>'; }
               catch(e) { out.innerHTML = '<div class="error-banner">' + escapeHtml(e.message) + '</div>'; }
               ab.disabled = false;
             }); }
@@ -450,7 +450,7 @@
               try { var r = await fetchJSON('/api/mrc/agent/schema_review', {method:'POST', body:{kind:'recognition', payload:{
                         file_name: p.file_name, fingerprint: p.fingerprint, name: document.getElementById('mrcSchemaName').value,
                         description: document.getElementById('mrcSchemaDesc').value, fields: fields}}});
-                    out.innerHTML = md(r.review) + '<div style="font-size:11px;color:var(--mut);margin-top:6px">Logged as ' + escapeHtml(r.note_id) + ' · advises only</div>'; }
+                    out.innerHTML = md(r.review) + '<div style="font-size:11px;color:var(--mut);margin-top:6px">Logged as ' + escapeHtml(r.note_id) + (r.cached ? ' · replayed from cache' : '') + ' · advises only</div>'; }
               catch(e) { out.innerHTML = '<div class="error-banner">' + escapeHtml(e.message) + '</div>'; }
               b.disabled = false;
             });
@@ -547,7 +547,7 @@
               try { var r = await fetchJSON('/api/mrc/agent/schema_review', {method:'POST', body:{kind:'changes', payload:{
                         file_name: c.file_name, schema: c.schema, version: c.version, changes: c.diff, decisions: decisions,
                         change_note: document.getElementById('mrcChangeNote').value}}});
-                    out.innerHTML = md(r.review) + '<div style="font-size:11px;color:var(--mut);margin-top:6px">Logged as ' + escapeHtml(r.note_id) + ' · advises only</div>'; }
+                    out.innerHTML = md(r.review) + '<div style="font-size:11px;color:var(--mut);margin-top:6px">Logged as ' + escapeHtml(r.note_id) + (r.cached ? ' · replayed from cache' : '') + ' · advises only</div>'; }
               catch(e) { out.innerHTML = '<div class="error-banner">' + escapeHtml(e.message) + '</div>'; }
               b.disabled = false;
             });
@@ -787,7 +787,7 @@
               var res;
               try { res = await fetchJSON('/api/mrc/ask', {method:'POST', body:{question:q}}); }
               catch(e) { box.innerHTML = '<div class="error-banner">' + escapeHtml(e.message) + '</div>'; return; }
-              var h = '';
+              var h = res.cached ? '<div style="font-size:11px;color:#92400e;margin-bottom:6px">Replayed from cache — switch the mode to LIVE to ask the model again</div>' : '';
               if (res.genie) {
                 h += '<div class="card"><div style="font-weight:700;margin-bottom:6px">From the extracted data (Genie)</div>';
                 if (res.genie.answer) { h += md(res.genie.answer); }
@@ -1869,6 +1869,7 @@
     // Main render
     async function render(quiet) {
       if (window.__mrcPoll) { clearInterval(window.__mrcPoll); window.__mrcPoll = null; }
+      if (!quiet) { window.__mrcProposal = null; window.__mrcChanges = null; window.__mrcChangesDoc = null; }
       renderNav();
       const hash = (window.location.hash || '#home').slice(1).split('?')[0];
       const viewFn = views[hash] || views.home;
