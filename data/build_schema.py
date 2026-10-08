@@ -166,6 +166,8 @@ def build(cfg):
               brokerage_pct DOUBLE,
               checks_failed INT COMMENT 'Number of contract-certainty checks failed.',
               certainty_status STRING COMMENT 'pass | fail.',
+              schema_name STRING COMMENT 'The registered MRC schema the contract was read with.',
+              schema_version STRING,
               source_document_id STRING
             ) COMMENT 'Headline structured facts extracted from each Market Reform Contract (prose). Numeric premium/limit are parsed deterministically from the prose (which is kept as provenance). Full entity detail lives in the shared assertion graph.'""",
 
@@ -206,7 +208,8 @@ def build(cfg):
     run_batch(tables, cfg, label="tables")
     for col, typ in [("choice_of_law", "STRING"), ("situation", "STRING"), ("slip_leader", "STRING"),
                      ("signed_lines_total", "DOUBLE"), ("brokerage_pct", "DOUBLE"),
-                     ("checks_failed", "INT"), ("certainty_status", "STRING")]:
+                     ("checks_failed", "INT"), ("certainty_status", "STRING"),
+                     ("schema_name", "STRING"), ("schema_version", "STRING")]:
         try:
             sql(f"ALTER TABLE {F}.mrc_entities ADD COLUMNS ({col} {typ})", cfg=cfg)
         except Exception:

@@ -105,7 +105,7 @@ def _field(sec, label):
     """Value + the full source line for 'Label: value' inside a section."""
     # The PDF parser may render an apostrophe as a typographic one; accept either.
     pat = re.escape(label).replace("'", "['\u2019`]?")
-    m = re.search(rf"{pat}\s*(.+)", sec or "")
+    m = re.search(rf"(?m)^[ \t]*{pat}[ \t]*(.+)$", sec or "")
     if not m:
         return None, None
     line = m.group(0).strip()
@@ -124,7 +124,7 @@ def _list_after(sec, label, stops):
     return items, (label + " " + "; ".join(items))[:240] if items else None
 
 
-def det_parse(text):
+def det_parse(text, alt=None):
     """Deterministic extraction against the MRC v3 sections. Returns (values, quotes) where
     quotes[key] = (section, source line) — the lineage for every extracted value."""
     secs = _sections(text or "")
@@ -133,8 +133,14 @@ def det_parse(text):
                   secs.get("BROKER REMUNERATION AND DEDUCTIONS", ""))
     d, q = {}, {}
 
+    alt = alt or {}
+
     def take(key, sec_name, sec, label):
         v, line = _field(sec, label)
+        for a in alt.get(key, []):  # labels learned when a changed layout was accepted
+            if v is not None:
+                break
+            v, line = _field(sec, a)
         d[key] = v
         if line:
             q[key] = (sec_name, line[:240])
@@ -326,7 +332,7 @@ def register_schema(cfg, actor="reviewer", from_doc=None):
 
 
 # ---------------------------------------------------------------- ingest (rule 5: recognised -> analytics)
-def ingest(cfg, doc_id, actor="mrc-pipeline", rec=None):
+def ingest(cfg, doc_id, actor="mrc-pipeline", rec=None, schema=None):
     """Extract a recognised MRC into the graph + projections; mark it recognised/active.
     `rec` (from recognise()) is reused so the PDF is parsed once."""
     F = cfg["full_schema"]
@@ -398,8 +404,19 @@ def ingest(cfg, doc_id, actor="mrc-pipeline", rec=None):
         [{"mrc_id": pol, "source_document_id": doc_id, **c} for c in checks], cfg)
     failed = sum(1 for c in checks if c["status"] == "fail")
 
-    prem_amt, prem_ccy = _parse_money(d.get("premium_text"))
-    lim_amt, _ = _parse_money(d.get("headline_limit"))
+    # Headline columns come through each value's ACORD binding, so any schema fills them
+    # (e.g. a binding authority's coverholder -> insured_name, estimated premium income -> premium).
+    from jobs.mrc_schemas import BINDING_TO_COLUMN
+    col = {}
+    for pt in rec["points"]:
+        c, v = BINDING_TO_COLUMN.get(pt.get("acord") or ""), d.get(pt["key"])
+        if c and v and c not in col:
+            col[c] = "; ".join(v) if isinstance(v, list) else v
+    pick = lambda c, k: col.get(c) or d.get(k)
+    schema_name = (schema or {}).get("name", SCHEMA_NAME)
+    schema_version = (schema or {}).get("version", "v1")
+    prem_amt, prem_ccy = _parse_money(pick("premium_text", "premium_text"))
+    lim_amt, _ = _parse_money(pick("headline_limit", "headline_limit"))
     try:
         brokerage = float((d.get("brokerage") or "").rstrip("%"))
     except ValueError:
@@ -414,25 +431,30 @@ def ingest(cfg, doc_id, actor="mrc-pipeline", rec=None):
         ("limit_amount", "dec"), ("n_clauses", "int"), ("n_exclusions", "int"),
         ("n_insurers", "int"), ("choice_of_law", "str"), ("situation", "str"), ("slip_leader", "str"),
         ("signed_lines_total", "float"), ("brokerage_pct", "float"), ("checks_failed", "int"),
-        ("certainty_status", "str"), ("source_document_id", "str")], [{
-            "mrc_id": pol, "umr": d.get("umr"), "policy_number": d.get("policy_number"),
-            "class_of_business": d.get("class_of_business"), "inception_date": d.get("inception_date"),
-            "expiry_date": d.get("expiry_date"), "insured_name": d.get("insured_name"),
-            "broker_name": d.get("broker_name"), "premium_text": d.get("premium_text"),
-            "headline_limit": d.get("headline_limit"), "deductible_text": d.get("deductible_text"),
+        ("certainty_status", "str"), ("schema_name", "str"), ("schema_version", "str"),
+        ("source_document_id", "str")], [{
+            "mrc_id": pol, "umr": pick("umr", "umr"), "policy_number": pick("policy_number", "policy_number"),
+            "class_of_business": pick("class_of_business", "class_of_business"),
+            "inception_date": d.get("inception_date"),
+            "expiry_date": d.get("expiry_date"), "insured_name": pick("insured_name", "insured_name"),
+            "broker_name": pick("broker_name", "broker_name"), "premium_text": pick("premium_text", "premium_text"),
+            "headline_limit": pick("headline_limit", "headline_limit"),
+            "deductible_text": pick("deductible_text", "deductible_text"),
             "premium_amount": prem_amt, "premium_currency": prem_ccy, "limit_amount": lim_amt,
-            "n_clauses": len(d.get("clauses", [])), "n_exclusions": len(d.get("exclusions", [])),
-            "n_insurers": len(d.get("insurers", [])), "choice_of_law": d.get("choice_of_law"),
-            "situation": d.get("situation"), "slip_leader": d.get("slip_leader"),
+            "n_clauses": len(d.get("clauses") or []), "n_exclusions": len(d.get("exclusions") or []),
+            "n_insurers": len(d.get("insurers") or []), "choice_of_law": pick("choice_of_law", "choice_of_law"),
+            "situation": pick("situation", "situation"), "slip_leader": pick("slip_leader", "slip_leader"),
+            "schema_name": schema_name, "schema_version": schema_version,
             "signed_lines_total": d.get("signed_lines_total"), "brokerage_pct": brokerage,
             "checks_failed": failed, "certainty_status": "pass" if failed == 0 else "fail",
             "source_document_id": doc_id}], cfg)
 
     sql(f"""UPDATE {F}.source_document
-            SET status='active', inbound_state='recognised', template_version='mrc-v1',
+            SET status='active', inbound_state='recognised', template_version=:tv,
                 counterparty=coalesce(:brk, counterparty), signed_off_by=:actor, signed_off_at=current_timestamp()
             WHERE doc_id=:d""",
-        params={"brk": d.get("broker_name"), "actor": actor, "d": doc_id}, cfg=cfg)
+        params={"brk": pick("broker_name", "broker_name"), "actor": actor, "d": doc_id,
+                "tv": f"{schema_name} {schema_version}"}, cfg=cfg)
     audit(cfg, "ingested", "source_document", doc_id,
           detail=f"MRC {d.get('umr')}: recognised -> {len(nodes)} nodes; {failed} certainty check(s) failed",
           actor=actor)
@@ -474,20 +496,31 @@ def ai_graph(cfg, text):
 
 
 # ---------------------------------------------------------------- HITL actions (app-facing)
-def propose_first(cfg):
-    """Recognition checklist for the first awaiting document (drives Schema Recognition)."""
+def propose(cfg, doc_id=None):
+    """Recognition checklist for one document (drives Schema Recognition). With no doc_id,
+    returns the documents still awaiting recognition so the screen can offer a choice."""
     F = cfg["full_schema"]
-    r = sql(f"""SELECT doc_id, file_name, stored_path, counterparty FROM {F}.source_document
-                WHERE tenant='mrc' AND status='awaiting_recognition'
-                ORDER BY ingested_at LIMIT 1""", cfg=cfg)
+    if not doc_id:
+        waiting = sql(f"""SELECT doc_id, file_name, counterparty FROM {F}.source_document
+                          WHERE tenant='mrc' AND status='awaiting_recognition' ORDER BY file_name""", cfg=cfg)
+        return {"doc_id": None, "schema_registered": schema_registered(cfg), "schema_name": SCHEMA_NAME,
+                "waiting": [{"doc_id": d, "file_name": f, "counterparty": c} for d, f, c in waiting]}
+    r = sql(f"""SELECT doc_id, file_name, stored_path, counterparty, inbound_state FROM {F}.source_document
+                WHERE tenant='mrc' AND doc_id=:d""", params={"d": doc_id}, cfg=cfg)
     if not r:
-        return {"doc_id": None, "message": "no documents awaiting recognition"}
-    doc_id, fname, path, cp = r[0]
+        return {"doc_id": None, "error": "no such document"}
+    doc_id, fname, path, cp, state = r[0]
     rec = recognise(cfg, path)
-    return {"doc_id": doc_id, "file_name": fname, "counterparty": cp,
+    return {"doc_id": doc_id, "file_name": fname, "counterparty": cp, "inbound_state": state,
             "conforming": rec["conforming"], "core_found": rec["core_found"],
             "core_total": rec["core_total"], "points": rec["points"],
             "schema_registered": schema_registered(cfg), "schema_name": SCHEMA_NAME}
+
+
+def propose_first(cfg):
+    """Back-compat: the checklist for the first awaiting document."""
+    first = propose(cfg)
+    return propose(cfg, first["waiting"][0]["doc_id"]) if first.get("waiting") else first
 
 
 def confirm_and_register(cfg, actor="reviewer"):

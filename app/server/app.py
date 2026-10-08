@@ -24,6 +24,7 @@ import lib  # noqa: E402
 from jobs import ingest_pipeline as pipe  # noqa: E402
 from jobs import trust_loop as tl  # noqa: E402
 from jobs import mrc_pipeline as mrc  # noqa: E402
+from jobs import mrc_schemas as ms  # noqa: E402
 from agents import extraction_review as review  # noqa: E402
 
 # In-app: use the app SP (default auth), not a CLI profile.
@@ -409,12 +410,13 @@ def mrc_list():
         f"""SELECT mrc_id,umr,policy_number,class_of_business,inception_date,expiry_date,
                    insured_name,broker_name,premium_text,headline_limit,deductible_text,
                    n_clauses,n_exclusions,n_insurers,source_document_id,
-                   slip_leader,signed_lines_total,choice_of_law,checks_failed,certainty_status
-            FROM {F}.v_mrc_entities_latest ORDER BY policy_number""",
+                   slip_leader,signed_lines_total,choice_of_law,checks_failed,certainty_status,schema_name,schema_version
+            FROM {F}.v_mrc_entities_latest ORDER BY schema_name, policy_number""",
         ["mrc_id", "umr", "policy_number", "class_of_business", "inception_date", "expiry_date",
          "insured_name", "broker_name", "premium_text", "headline_limit", "deductible_text",
          "n_clauses", "n_exclusions", "n_insurers", "source_document_id",
-         "slip_leader", "signed_lines_total", "choice_of_law", "checks_failed", "certainty_status"])}
+         "slip_leader", "signed_lines_total", "choice_of_law", "checks_failed", "certainty_status",
+         "schema_name", "schema_version"])}
 
 
 # Editable metric columns — an allowlist; the field name is validated against this
@@ -429,24 +431,25 @@ def mrc_metrics():
     contracts = rows_as_dicts(
         f"""SELECT mrc_id, policy_number, class_of_business, insured_name, broker_name,
                    premium_amount, premium_currency, limit_amount
-            FROM {F}.v_mrc_entities_latest ORDER BY policy_number""",
+            FROM {F}.v_mrc_entities_latest WHERE coalesce(schema_name, :om) = :om ORDER BY policy_number""",
         ["mrc_id", "policy_number", "class_of_business", "insured_name", "broker_name",
-         "premium_amount", "premium_currency", "limit_amount"])
+         "premium_amount", "premium_currency", "limit_amount"], {"om": ms.OPEN_MARKET})
     t = q(f"""SELECT count(*), round(avg(n_clauses),1), round(avg(n_exclusions),1)
-              FROM {F}.v_mrc_entities_latest""")[0]
+              FROM {F}.v_mrc_entities_latest WHERE coalesce(schema_name, :om) = :om""", {"om": ms.OPEN_MARKET})[0]
     by_ccy = rows_as_dicts(
         f"""SELECT premium_currency AS currency, count(*) AS n,
                    round(coalesce(sum(premium_amount),0),2) AS premium,
                    round(coalesce(sum(limit_amount),0),2) AS limit_amt
-            FROM {F}.v_mrc_entities_latest GROUP BY premium_currency ORDER BY premium DESC""",
-        ["currency", "n", "premium", "limit_amt"])
+            FROM {F}.v_mrc_entities_latest WHERE coalesce(schema_name, :om) = :om
+            GROUP BY premium_currency ORDER BY premium DESC""",
+        ["currency", "n", "premium", "limit_amt"], {"om": ms.OPEN_MARKET})
     by_class = rows_as_dicts(
         f"""SELECT class_of_business, premium_currency AS currency,
                    round(coalesce(sum(premium_amount),0),2) AS premium,
                    round(coalesce(sum(limit_amount),0),2) AS limit_amt, count(*) AS n
-            FROM {F}.v_mrc_entities_latest GROUP BY class_of_business, premium_currency
-            ORDER BY premium DESC""",
-        ["class_of_business", "currency", "premium", "limit_amt", "n"])
+            FROM {F}.v_mrc_entities_latest WHERE coalesce(schema_name, :om) = :om
+            GROUP BY class_of_business, premium_currency ORDER BY premium DESC""",
+        ["class_of_business", "currency", "premium", "limit_amt", "n"], {"om": ms.OPEN_MARKET})
     return {"contracts": contracts, "by_class": by_class, "by_currency": by_ccy,
             "totals": {"contracts": int(t[0]), "avg_clauses": float(t[1] or 0),
                        "avg_exclusions": float(t[2] or 0)},
@@ -481,14 +484,18 @@ def mrc_update(body: dict = Body(...)):
 def mrc_inbox():
     """MRC documents with their flow state: awaiting recognition / recognised / HITL."""
     docs = rows_as_dicts(
-        f"""SELECT doc_id,file_name,counterparty,status,inbound_state,reporting_period,ingested_at
-            FROM {F}.source_document WHERE tenant='mrc' ORDER BY ingested_at""",
-        ["doc_id", "file_name", "counterparty", "status", "inbound_state", "reporting_period", "ingested_at"])
+        f"""SELECT doc_id,file_name,counterparty,status,inbound_state,reporting_period,ingested_at,template_version,
+                   get_json_object(reconciliation_detail, '$.schema') AS flagged_schema
+            FROM {F}.source_document WHERE tenant='mrc' ORDER BY file_name""",
+        ["doc_id", "file_name", "counterparty", "status", "inbound_state", "reporting_period", "ingested_at",
+         "template_version", "flagged_schema"])
     counts = {}
     for d in docs:
         counts[d["inbound_state"]] = counts.get(d["inbound_state"], 0) + 1
+    n_schemas = q(f"SELECT count(DISTINCT counterparty) FROM {F}.template WHERE doc_family='mrc'")[0][0]
     return {"documents": docs, "state_counts": counts, "schema_registered": mrc.schema_registered(CFG),
-            "job": {"running": _MRC_JOB["running"], "kind": _MRC_JOB["kind"]}}
+            "schemas": int(n_schemas),
+            "job": {"running": _MRC_JOB["running"], "kind": _MRC_JOB["kind"], "error": _MRC_JOB["error"]}}
 
 
 @app.get("/api/mrc/pdf/{doc_id}")
@@ -508,65 +515,99 @@ def mrc_pdf(doc_id: str):
                              "Cache-Control": "no-store"})
 
 
+_MRC_JOB = {"running": False, "result": None, "kind": None, "error": None}
+
+
+def _start_job(kind, fn):
+    """Run one MRC action in the background. Only one runs at a time (intake, recognise,
+    accept-changes and reset can never overlap)."""
+    import threading
+    if _MRC_JOB["running"]:
+        raise HTTPException(409, "Another step is still running — try again when it finishes")
+    _MRC_JOB.update(running=True, result=None, kind=kind, error=None)
+
+    def run():
+        try:
+            _MRC_JOB["result"] = fn()
+        except Exception as e:  # surfaced on the progress endpoint
+            _MRC_JOB["error"] = str(e)[:300]
+        finally:
+            _MRC_JOB["running"] = False
+    threading.Thread(target=run, daemon=True).start()
+    return {"started": kind}
+
+
+@app.post("/api/mrc/intake")
+def mrc_intake(body: dict = Body(default={})):
+    """Read and route every received document (in production a file-arrival trigger does this)."""
+    return _start_job("intake", lambda: ms.intake(CFG))
+
+
 @app.get("/api/mrc/propose")
-def mrc_propose():
-    """Recognition checklist for the first awaiting MRC — expected ACORD data points, all/some."""
-    return mrc.propose_first(CFG)
-
-
-_MRC_JOB = {"running": False, "result": None, "kind": None}
+def mrc_propose(doc_id: str = ""):
+    """Schema recognition: a proposed schema for a document no registered schema matches.
+    Without doc_id: the documents waiting for recognition."""
+    if not doc_id:
+        rows = rows_as_dicts(
+            f"""SELECT doc_id, file_name FROM {F}.source_document
+                WHERE tenant='mrc' AND inbound_state='new_schema' ORDER BY file_name""", ["doc_id", "file_name"])
+        return {"doc_id": None, "waiting": rows}
+    try:
+        return ms.propose(CFG, doc_id)
+    except ValueError as e:
+        raise HTTPException(404, str(e))
 
 
 @app.post("/api/mrc/confirm")
 def mrc_confirm(body: dict = Body(...)):
-    """HITL confirm: record the schema in the repository immediately, then process the
-    awaiting contracts in the background. The Inbox shows each one flip to recognised."""
-    import threading
+    """A person confirmed a proposed schema: record it (v1) and ingest the document."""
+    doc_id, name, fields = body.get("doc_id"), (body.get("name") or "").strip(), body.get("fields") or []
+    if not doc_id or not name:
+        raise HTTPException(400, "doc_id and a schema name are required")
+    st = q(f"SELECT inbound_state FROM {F}.source_document WHERE tenant='mrc' AND doc_id=:d", {"d": doc_id})
+    if not st or st[0][0] != "new_schema":
+        raise HTTPException(400, "This document is not waiting for schema recognition")
+    if not any(f.get("include") and f.get("binding") for f in fields):
+        raise HTTPException(400, "Select at least one field")
     actor = body.get("actor", "reviewer")
-    first = q(f"""SELECT doc_id FROM {F}.source_document WHERE tenant='mrc'
-                  AND status='awaiting_recognition' ORDER BY ingested_at LIMIT 1""")
-    if _MRC_JOB["running"] and _MRC_JOB["kind"] == "reset":
-        raise HTTPException(409, "The demo is being reset — try again when it finishes")
-    reg = mrc.register_schema(CFG, actor=actor, from_doc=first[0][0] if first else None)
-    if not _MRC_JOB["running"]:
-        def run():
-            _MRC_JOB.update(running=True, result=None, kind="processing")
-            try:
-                _MRC_JOB["result"] = mrc.rescan(CFG, actor="mrc-pipeline")
-            finally:
-                _MRC_JOB["running"] = False
-        threading.Thread(target=run, daemon=True).start()
-    return {"schema": reg, "processing": True}
+    return _start_job("recognise", lambda: ms.confirm_new_schema(CFG, doc_id, name, fields, actor=actor))
+
+
+@app.get("/api/mrc/changes")
+def mrc_changes(doc_id: str):
+    """What changed against the registered schema for a flagged document."""
+    try:
+        return ms.changes(CFG, doc_id)
+    except ValueError as e:
+        raise HTTPException(404, str(e))
+
+
+@app.post("/api/mrc/accept_changes")
+def mrc_accept_changes(body: dict = Body(...)):
+    """Accept a changed layout: record the next schema version (learned labels) and ingest."""
+    doc_id = body.get("doc_id")
+    st = q(f"SELECT inbound_state FROM {F}.source_document WHERE tenant='mrc' AND doc_id=:d", {"d": doc_id})
+    if not st or st[0][0] != "schema_changed":
+        raise HTTPException(400, "This document is not flagged as a changed layout")
+    actor = body.get("actor", "reviewer")
+    return _start_job("accept", lambda: ms.accept_changes(CFG, doc_id, actor=actor))
 
 
 @app.get("/api/mrc/progress")
 def mrc_progress():
     states = {r[0]: int(r[1]) for r in q(
         f"SELECT inbound_state, count(*) FROM {F}.source_document WHERE tenant='mrc' GROUP BY inbound_state")}
-    return {"running": _MRC_JOB["running"], "kind": _MRC_JOB["kind"], "result": _MRC_JOB["result"], "states": states}
+    return {"running": _MRC_JOB["running"], "kind": _MRC_JOB["kind"], "result": _MRC_JOB["result"],
+            "error": _MRC_JOB["error"], "states": states}
 
 
 @app.post("/api/mrc/reset")
 def mrc_reset_demo(body: dict = Body(default={})):
-    """Return the MRC flow to its demo starting point (the in-app version of
-    tools/mrc_reset.py): clears the recorded schema, processed contracts, checks, graph rows,
-    decisions and this flow's audit trail, then re-stages the five contracts and the cover
-    note. Runs in the background (~1 min); refuses while another MRC job is running.
-    The PDFs are not regenerated here, so the Knowledge Assistant index stays valid."""
-    import threading
-    if _MRC_JOB["running"]:
-        raise HTTPException(409, "Contracts are still being processed — try again when it finishes")
+    """Return the MRC flow to its demo starting point: the open-market schema recorded (v1)
+    and all eight documents received, not yet read. PDFs are not regenerated here, so the
+    Knowledge Assistant index stays valid."""
     from tools.mrc_reset import reset as _reset
-
-    def run():
-        _MRC_JOB.update(running=True, result=None, kind="reset")
-        try:
-            states = _reset(CFG, regenerate=False)
-            _MRC_JOB["result"] = {k: int(v) for k, v in states}
-        finally:
-            _MRC_JOB["running"] = False
-    threading.Thread(target=run, daemon=True).start()
-    return {"resetting": True}
+    return _start_job("reset", lambda: {k: int(v) for k, v in _reset(CFG, regenerate=False)})
 
 
 @app.post("/api/mrc/review")
@@ -645,12 +686,23 @@ def mrc_audit():
 
 @app.get("/api/mrc/schemas")
 def mrc_schemas():
-    """The registered MRC schema(s) in the repository."""
+    """The schema repository: every recorded MRC schema with its full version history."""
     rows = rows_as_dicts(
-        f"""SELECT counterparty,doc_family,template_version,field_count,field_map,created_by,created_at
-            FROM {F}.v_template_latest WHERE doc_family='mrc' ORDER BY created_at DESC""",
-        ["counterparty", "doc_family", "template_version", "field_count", "field_map", "created_by", "created_at"])
-    return {"schemas": rows}
+        f"""SELECT counterparty, template_version, field_count, field_map, expected_anchors, created_by, created_at
+            FROM {F}.template WHERE doc_family='mrc' ORDER BY counterparty, created_at DESC""",
+        ["name", "version", "field_count", "field_map", "fingerprint", "created_by", "created_at"])
+    used = {r[0]: int(r[1]) for r in q(
+        f"SELECT schema_name, count(*) FROM {F}.v_mrc_entities_latest GROUP BY schema_name")}
+    out = {}
+    for r in rows:
+        fm = json.loads(r["field_map"] or "{}")
+        r["points"] = [{"key": k, "label": v.get("display") or v.get("label"), "source_label": v.get("label"),
+                        "learned_labels": v.get("labels", []), "acord": f"{v.get('entity')}.{v.get('attribute')}",
+                        "cdr": v.get("cdr"), "section": v.get("section"), "core": v.get("core")} for k, v in fm.items()]
+        r["fingerprint"] = json.loads(r["fingerprint"] or "{}")
+        r.pop("field_map")
+        out.setdefault(r["name"], {"name": r["name"], "versions": [], "contracts": used.get(r["name"], 0)})["versions"].append(r)
+    return {"schemas": list(out.values())}
 
 
 @app.get("/api/mrc/semantics")

@@ -80,6 +80,7 @@
         views:[
           {id:'mrc_inbox', label:'Inbox', icon:'📥'},
           {id:'mrc_recognition', label:'Schema Recognition', icon:'🧬'},
+          {id:'mrc_changes', label:'Schema Changes', icon:'🔀'},
           {id:'mrc_schemas', label:'Schema Repository', icon:'🗄️'},
           {id:'mrc_certainty', label:'Contract Certainty', icon:'✅'},
           {id:'mrc_cdr', label:'Core Data Record', icon:'🧾'},
@@ -223,58 +224,71 @@
       'mrc_inbox': async function() {
         const d = await fetchJSON('/api/mrc/inbox');
         const c = d.state_counts || {};
+        const job = d.job || {};
         const META = {
-          awaiting_recognition: ['differs', 'Awaiting recognition'],
-          processing: ['plain', 'Processing…'],
-          recognised: ['active', 'Recognised → ingested'],
-          unrecognised: ['quarantined', 'Needs review (HITL)'],
+          received: ['plain', 'Received — not yet read'],
+          processing: ['plain', 'Reading…'],
+          recognised: ['active', 'Known schema → ingested'],
+          schema_changed: ['differs', 'Known schema, changed → needs review'],
+          new_schema: ['differs', 'New schema → recognise'],
+          unrecognised: ['quarantined', 'Not an MRC → needs review'],
           rejected: ['plain', 'Rejected — not an MRC'],
           returned_to_broker: ['plain', 'Returned to broker']
         };
         const m = s => META[s] || ['plain', s];
-        const job = d.job || {};
-        const resetting = job.running && job.kind === 'reset';
-        const busy = (c.processing || 0) > 0 || job.running;
-        const act = x => x.inbound_state === 'unrecognised'
-          ? `<button class="ghost" data-mrc-review="reject" data-doc="${escapeAttr(x.doc_id)}">Reject — not an MRC</button>
-             <button class="ghost" data-mrc-review="return" data-doc="${escapeAttr(x.doc_id)}">Return to broker</button>` : '';
+        const schemaCell = x => x.inbound_state === 'recognised' ? escapeHtml(x.template_version || '')
+          : x.inbound_state === 'schema_changed' ? escapeHtml((x.flagged_schema || '') + ' — layout differs')
+          : x.inbound_state === 'new_schema' ? '<span style="color:var(--mut)">No registered schema matches</span>'
+          : x.inbound_state === 'unrecognised' ? '<span style="color:var(--mut)">—</span>'
+          : '<span style="color:var(--mut)">not read yet</span>';
+        const act = x => x.inbound_state === 'new_schema'
+            ? `<a class="act" style="text-decoration:none;padding:6px 11px;border-radius:8px" href="#mrc_recognition?doc=${encodeURIComponent(x.doc_id)}">Recognise →</a>`
+          : x.inbound_state === 'schema_changed'
+            ? `<a class="act" style="text-decoration:none;padding:6px 11px;border-radius:8px" href="#mrc_changes?doc=${encodeURIComponent(x.doc_id)}">Review changes →</a>`
+          : x.inbound_state === 'unrecognised'
+            ? `<button class="ghost" data-mrc-review="reject" data-doc="${escapeAttr(x.doc_id)}">Reject — not an MRC</button>
+               <button class="ghost" data-mrc-review="return" data-doc="${escapeAttr(x.doc_id)}">Return to broker</button>` : '';
+        const received = (c.received || 0);
+        const busy = job.running || (c.processing || 0) > 0;
+        const jobMsg = {intake: 'Reading every received document and matching it against the schema repository — known contracts land on their own.',
+                        recognise: 'Recording the new schema and ingesting the document…',
+                        accept: 'Recording the new schema version and ingesting the document…',
+                        reset: 'Resetting the demo to its starting point — about half a minute.'}[job.kind] || 'Working…';
         return `
           <details class="details-summary" open><summary>What am I seeing?</summary>
-            <div class="body">Every document that has arrived and where it is in the loop. A contract that matches the recorded schema is recognised and ingested automatically. Anything that doesn't match is held for a person to decide — it never lands on its own.</div>
+            <div class="body">Every document that has arrived. Each one is matched against the schema repository by its fingerprint — the document title and its section headings. A match with every expected field lands automatically; a match with changed or missing fields is flagged for review; an MRC with no matching schema goes to schema recognition; anything that is not an MRC is held for a person.</div>
           </details>
-          ${!d.schema_registered ? '<div class="banner">No MRC schema recorded yet — open <b>Schema Recognition</b> to confirm the first contract. After that, matching contracts flow straight through.</div>' : ''}
-          ${resetting ? '<div class="banner"><span class="spin"></span> Resetting the demo to its starting point — about a minute. The documents reappear as they are re-staged.</div>'
-            : (busy ? '<div class="banner"><span class="spin"></span> Processing contracts against the recorded schema — they appear as recognised one by one.</div>' : '')}
+          ${busy ? `<div class="banner"><span class="spin"></span> ${escapeHtml(jobMsg)}</div>` : ''}
+          ${job.error && !busy ? `<div class="error-banner">The last step failed: ${escapeHtml(job.error)}</div>` : ''}
+          ${!busy && received ? `<div class="card" style="display:flex;justify-content:space-between;align-items:center;gap:16px;border-left:4px solid var(--brand)">
+              <div><div style="font-weight:700">${received} document${received > 1 ? 's' : ''} received, not yet read</div>
+              <div style="font-size:12px;color:var(--mut)">In production a file-arrival trigger runs this step automatically.</div></div>
+              <button class="act" id="mrcIntakeBtn">Run intake</button></div>` : ''}
           <div class="tiles">
-            <div class="tile"><div class="k">Awaiting recognition</div><div class="v warn">${(c.awaiting_recognition || 0) + (c.processing || 0)}</div></div>
-            <div class="tile"><div class="k">Recognised</div><div class="v pos">${c.recognised || 0}</div></div>
-            <div class="tile"><div class="k">Needs review</div><div class="v neg">${c.unrecognised || 0}</div></div>
-            <div class="tile"><div class="k">Resolved by a person</div><div class="v">${(c.rejected || 0) + (c.returned_to_broker || 0)}</div></div>
-            <div class="tile"><div class="k">Total</div><div class="v">${d.documents.length}</div></div>
+            <div class="tile"><div class="k">Known schema → ingested</div><div class="v pos">${c.recognised || 0}</div></div>
+            <div class="tile"><div class="k">Changed → review</div><div class="v warn">${c.schema_changed || 0}</div></div>
+            <div class="tile"><div class="k">New schema</div><div class="v warn">${c.new_schema || 0}</div></div>
+            <div class="tile"><div class="k">Not an MRC</div><div class="v neg">${c.unrecognised || 0}</div></div>
+            <div class="tile"><div class="k">Schemas in repository</div><div class="v">${d.schemas || 0}</div></div>
           </div>
           <div id="mrcPdfViewer"></div>
           <div class="card"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
             <h2 style="margin:0">Documents</h2>
             <button class="ghost" id="mrcResetBtn" ${busy ? 'disabled' : ''} title="Return this flow to the demo starting point">↺ Reset demo</button></div>
-            <table><thead><tr><th>File</th><th>Broker</th><th>State</th><th></th></tr></thead>
+            <table><thead><tr><th>File</th><th>Broker</th><th>Schema</th><th>State</th><th></th></tr></thead>
             <tbody>${d.documents.map(x => `<tr>
               <td style="font-weight:600">${escapeHtml(x.file_name)}</td>
-              <td>${escapeHtml(x.counterparty || '—')}</td>
+              <td>${escapeHtml(x.counterparty && x.counterparty !== '—' ? x.counterparty : '—')}</td>
+              <td style="font-size:12px">${schemaCell(x)}</td>
               <td><span class="chip ${m(x.inbound_state)[0]}">${escapeHtml(m(x.inbound_state)[1])}</span></td>
               <td style="white-space:nowrap"><button class="ghost" data-mrc-view="${escapeAttr(x.doc_id)}" data-name="${escapeAttr(x.file_name)}">View</button> ${act(x)}</td></tr>`).join('')}</tbody></table></div>
           <script>
-            document.querySelectorAll('[data-mrc-review]').forEach(function(b){
-              b.addEventListener('click', async function(){
-                var action = b.getAttribute('data-mrc-review');
-                var c = await confirm(action === 'reject' ? 'Reject this document? It is not a Market Reform Contract.' : 'Return this document to the broker for a full MRC?');
-                if(!c.confirmed){ return; }
-                try{
-                  await fetchJSON('/api/mrc/review',{method:'POST',body:{doc_id:b.getAttribute('data-doc'),action:action,reason:c.reason}});
-                  toast(action === 'reject' ? 'Rejected — decision recorded' : 'Returned to broker — decision recorded');
-                  render();
-                }catch(e){ toast('Error: '+e.message); }
-              });
-            });
+            var ib = document.getElementById('mrcIntakeBtn');
+            if (ib) { ib.addEventListener('click', async function(){
+              ib.disabled = true; ib.textContent = 'Starting…';
+              try { await fetchJSON('/api/mrc/intake', {method:'POST', body:{}}); render(); }
+              catch(e){ toast('Could not start intake: ' + e.message); ib.disabled = false; ib.textContent = 'Run intake'; }
+            }); }
             document.querySelectorAll('[data-mrc-view]').forEach(function(b){
               b.addEventListener('click', function(){
                 var id = b.getAttribute('data-mrc-view');
@@ -289,149 +303,172 @@
                 box.scrollIntoView({behavior:'smooth', block:'start'});
               });
             });
+            document.querySelectorAll('[data-mrc-review]').forEach(function(b){
+              b.addEventListener('click', async function(){
+                var action = b.getAttribute('data-mrc-review');
+                var c = await confirm(action === 'reject' ? 'Reject this document? It is not a Market Reform Contract.' : 'Return this document to the broker for a full MRC?');
+                if(!c.confirmed){ return; }
+                try{
+                  await fetchJSON('/api/mrc/review',{method:'POST',body:{doc_id:b.getAttribute('data-doc'),action:action,reason:c.reason}});
+                  toast(action === 'reject' ? 'Rejected — decision recorded' : 'Returned to broker — decision recorded');
+                  render();
+                }catch(e){ toast('Error: '+e.message); }
+              });
+            });
             document.getElementById('mrcResetBtn').addEventListener('click', async function(){
-              var c = await confirm('Reset the MRC demo to its starting point? This clears the recorded schema, the processed contracts, their checks, the decisions and the audit trail for this flow, then re-stages the five contracts and the cover note. It takes about a minute.');
+              var c = await confirm('Reset the MRC demo to its starting point? This clears every schema except the pre-registered open-market one, all processed contracts, checks, decisions and the audit trail for this flow, and marks all eight documents as received again.');
               if(!c.confirmed){ return; }
-              try{
-                await fetchJSON('/api/mrc/reset',{method:'POST',body:{}});
-                toast('Resetting the demo…');
-                setTimeout(function(){ render(); }, 1500);
-              }catch(e){ toast('Could not reset: '+e.message); }
+              try{ await fetchJSON('/api/mrc/reset',{method:'POST',body:{}}); toast('Resetting the demo…'); setTimeout(function(){ render(); }, 1200); }
+              catch(e){ toast('Could not reset: '+e.message); }
             });
             if (${busy ? 'true' : 'false'}) {
-              setTimeout(function(){ if((window.location.hash||'').indexOf('#mrc_inbox')===0){ render(); } }, 2500);
+              setTimeout(function(){ if((window.location.hash||'').indexOf('#mrc_inbox')===0){ render(true); } }, 2500);
             }
           <\/script>`;
       },
 
       'mrc_recognition': async function() {
-        const p = await fetchJSON('/api/mrc/propose');
-        if (!p.doc_id) {
-          return `<details class="details-summary" open><summary>What am I seeing?</summary>
-            <div class="body">The recognition step for the next unrecognised MRC.</div></details>
-            <div class="card">No documents awaiting recognition — every conforming contract has been recognised. See <a href="#mrc">Contracts &amp; Ask</a>.</div>`;
+        const qs = new URLSearchParams((window.location.hash.split('?')[1]) || '');
+        const doc = qs.get('doc');
+        const explain = `<details class="details-summary" open><summary>What am I seeing?</summary>
+            <div class="body">Schema recognition for a document no registered schema matches. Fields the shared vocabulary already knows are reused as they are; unfamiliar fields are mapped to an ACORD term by the model, with its stated confidence. Check or change each mapping, then record the schema — every future document with this fingerprint is read with it automatically.</div></details>`;
+        if (!doc) {
+          const w = (await fetchJSON('/api/mrc/propose')).waiting || [];
+          return explain + `<div class="card"><h2 style="margin-top:0">Documents waiting for recognition</h2>` +
+            (w.length ? `<table><tbody>${w.map(x => `<tr><td style="font-weight:600">${escapeHtml(x.file_name)}</td>
+              <td style="text-align:right"><a class="act" style="text-decoration:none;padding:6px 11px;border-radius:8px" href="#mrc_recognition?doc=${encodeURIComponent(x.doc_id)}">Recognise →</a></td></tr>`).join('')}</tbody></table>`
+             : `<div style="color:var(--mut)">Nothing needs recognition. A document whose fingerprint matches no registered schema appears here after <a href="#mrc_inbox">Run intake</a>.</div>`) + `</div>`;
         }
-        const rows = p.points.map(pt => `<tr>
-          <td style="font-weight:600">${escapeHtml(pt.label)}${pt.core ? ' <span class="chip plain">core</span>' : ''}</td>
-          <td><code>${escapeHtml(pt.acord)}</code></td>
-          <td>${pt.cdr ? escapeHtml(pt.cdr) : '<span style="color:var(--mut)">— (wording only)</span>'}</td>
-          <td>${escapeHtml(pt.section)}</td>
-          <td><span class="chip ${pt.status === 'identified' ? 'active' : 'quarantined'}">${pt.status === 'identified' ? 'identified' : 'not found'}</span></td>
-          <td>${escapeHtml(pt.value || '—')}${pt.source_quote ? `<div style="font-size:11px;color:var(--mut);margin-top:3px">“${escapeHtml(pt.source_quote)}”</div>` : ''}</td></tr>`).join('');
-        return `
-          <details class="details-summary" open><summary>What am I seeing?</summary>
-            <div class="body">These are the ACORD data points we expect from an MRC. Extraction identifies all or some of them. When you confirm, the schema is recorded in the repository — and every matching contract after this flows straight through.</div>
-          </details>
-          <div class="strip">
-            <div><div class="lbl">Document</div><div class="big brand" style="font-size:19px">${escapeHtml(p.file_name)}</div></div>
-            <div><div class="lbl">Core data points identified</div><div class="big">${p.core_found}/${p.core_total}</div></div>
-            <div><div class="lbl">Conforms to MRC structure</div><div class="big ${p.conforming ? 'pos' : 'neg'}">${p.conforming ? 'Yes' : 'No'}</div></div>
+        const p = await fetchJSON('/api/mrc/propose?doc_id=' + encodeURIComponent(doc));
+        window.__mrcProposal = p;
+        const opt = (b, cur) => `<option value="${escapeAttr(b)}" ${b === cur ? 'selected' : ''}>${escapeHtml(b)}</option>`;
+        const rows = p.fields.map((f, i) => `<tr>
+          <td><input type="checkbox" data-inc="${i}" aria-label="Include ${escapeAttr(f.label)}" ${f.include ? 'checked' : ''}></td>
+          <td style="font-weight:600">${escapeHtml(f.label)}${f.core ? ' <span class="chip plain">core</span>' : ''}</td>
+          <td style="font-size:12px">${escapeHtml(f.section)}</td>
+          <td>${escapeHtml(f.value || '—')}${f.source_quote ? `<div style="font-size:11px;color:var(--mut);margin-top:3px">“${escapeHtml(f.source_quote)}”</div>` : ''}</td>
+          <td><select data-bind="${i}" aria-label="ACORD term for ${escapeAttr(f.label)}" style="max-width:220px;padding:5px;border:1px solid var(--line2);border-radius:6px">
+              <option value="">— no ACORD term —</option>${p.bindings.map(b => opt(b, f.binding)).join('')}</select></td>
+          <td style="font-size:12px">${f.cdr ? escapeHtml(f.cdr) : '<span style="color:var(--mut)">—</span>'}</td>
+          <td style="font-size:12px">${f.origin === 'known field' ? '<span class="chip active">known field</span>'
+              : `<span class="chip differs">model</span> ${f.confidence != null ? Math.round(f.confidence * 100) + '%' : ''}${f.why ? `<div style="color:var(--mut);margin-top:3px">${escapeHtml(f.why)}</div>` : ''}`}</td></tr>`).join('');
+        const known = p.fields.filter(f => f.origin === 'known field').length;
+        return explain + `<div class="strip">
+            <div><div class="lbl">Document</div><div class="big brand" style="font-size:18px">${escapeHtml(p.file_name)}</div></div>
+            <div><div class="lbl">Fingerprint</div><div class="big" style="font-size:15px">${escapeHtml(p.fingerprint.title)}</div></div>
+            <div><div class="lbl">Fields reused · proposed</div><div class="big">${known} · ${p.fields.length - known}</div></div>
           </div>
-          <div class="card"><h2 style="margin-top:0">Expected ACORD data points</h2>
-            <table><thead><tr><th>Data point</th><th>ACORD term</th><th>CDR field*</th><th>MRC section</th><th>Status</th><th style="min-width:240px">Value · source line</th></tr></thead>
+          <div class="card">
+            <div style="display:flex;gap:12px;align-items:center;margin-bottom:12px">
+              <label for="mrcSchemaName" style="font-weight:600;white-space:nowrap">Schema name</label>
+              <input id="mrcSchemaName" value="${escapeAttr(p.suggested_name)}" style="flex:1;padding:8px;border:1px solid var(--line2);border-radius:8px">
+              <a class="ghost" style="text-decoration:none;padding:7px 12px;border-radius:8px" href="/api/mrc/pdf/${encodeURIComponent(p.doc_id)}" target="_blank" rel="noopener">View PDF ↗</a>
+            </div>
+            <table><thead><tr><th></th><th>Field</th><th>Section</th><th style="min-width:220px">Value · source line</th><th>ACORD term</th><th>CDR field*</th><th>Mapping</th></tr></thead>
             <tbody>${rows}</tbody></table>
-            <div style="font-size:11px;color:var(--mut);margin-top:8px">* Indicative Lloyd's Core Data Record field — a paraphrased crosswalk for discussion, not the published specification. Values are read by MRC section and field label; the source line is shown for each.</div>
+            <div style="font-size:11px;color:var(--mut);margin-top:8px">* Indicative Lloyd's Core Data Record field — a paraphrased crosswalk for discussion, not the published specification. Values are read by section and label; the model only proposes the mapping for unfamiliar fields.</div>
             <div style="margin-top:16px;display:flex;align-items:center;gap:12px">
-              <button class="act" id="mrcConfirmBtn">Confirm &amp; register schema</button>
-              <span style="color:var(--mut);font-size:12px">Records "Lloyd's MRC (ACORD)" in the schema repository; the other contracts are then recognised and ingested automatically — watch them flip in the Inbox.</span>
+              <button class="act" id="mrcConfirmBtn">Confirm &amp; record schema</button>
+              <span style="color:var(--mut);font-size:12px">Records the schema as v1 in the repository and ingests this document with it.</span>
             </div>
           </div>
           <script>
-            document.getElementById('mrcConfirmBtn')?.addEventListener('click', async function(){
-              var b=this; b.disabled=true; b.textContent='Recording schema…';
-              try{
-                var r=await fetch('/api/mrc/confirm?mode='+MODE,{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'});
-                var d=await r.json(); if(!r.ok) throw new Error('HTTP '+r.status);
-                toast('Schema recorded — matching contracts are now flowing through');
-                setTimeout(function(){ window.location.hash='#mrc_inbox'; },900);
-              }catch(e){ toast('Error: '+e.message); b.disabled=false; b.textContent='Confirm & register schema'; }
+            document.getElementById('mrcConfirmBtn').addEventListener('click', async function(){
+              var p = window.__mrcProposal, b = this;
+              var fields = p.fields.map(function(f, i){
+                var o = Object.assign({}, f);
+                o.include = document.querySelector('[data-inc="' + i + '"]').checked;
+                o.binding = document.querySelector('[data-bind="' + i + '"]').value || null;
+                return o;
+              });
+              b.disabled = true; b.textContent = 'Recording…';
+              try {
+                await fetchJSON('/api/mrc/confirm', {method:'POST', body:{doc_id:p.doc_id, name:document.getElementById('mrcSchemaName').value, fields:fields}});
+                toast('Schema recorded — ingesting the document');
+                setTimeout(function(){ window.location.hash = '#mrc_inbox'; }, 700);
+              } catch(e) { toast('Could not record: ' + e.message); b.disabled = false; b.textContent = 'Confirm & record schema'; }
+            });
+          <\/script>`;
+      },
+
+      'mrc_changes': async function() {
+        const qs = new URLSearchParams((window.location.hash.split('?')[1]) || '');
+        const doc = qs.get('doc');
+        const explain = `<details class="details-summary" open><summary>What am I seeing?</summary>
+            <div class="body">A document that matches a registered schema's fingerprint but not every field: something was renamed or left out. Renames are proposed by text similarity; missing fields stay missing and remain visible as gaps downstream. Accepting records the next version of the schema, which has learned the new labels.</div></details>`;
+        if (!doc) {
+          const inbox = await fetchJSON('/api/mrc/inbox');
+          const w = (inbox.documents || []).filter(x => x.inbound_state === 'schema_changed');
+          return explain + `<div class="card"><h2 style="margin-top:0">Documents with layout changes</h2>` +
+            (w.length ? `<table><tbody>${w.map(x => `<tr><td style="font-weight:600">${escapeHtml(x.file_name)}</td>
+              <td style="text-align:right"><a class="act" style="text-decoration:none;padding:6px 11px;border-radius:8px" href="#mrc_changes?doc=${encodeURIComponent(x.doc_id)}">Review changes →</a></td></tr>`).join('')}</tbody></table>`
+             : `<div style="color:var(--mut)">No flagged layout changes. They appear here after <a href="#mrc_inbox">Run intake</a>.</div>`) + `</div>`;
+        }
+        const c = await fetchJSON('/api/mrc/changes?doc_id=' + encodeURIComponent(doc));
+        const next = 'v' + (parseInt(String(c.version || 'v1').replace('v', ''), 10) + 1);
+        const rows = (c.diff || []).map(r => `<tr>
+          <td style="font-weight:600">${escapeHtml(r.data_point)}</td>
+          <td style="font-size:12px">${escapeHtml(r.section)}</td>
+          <td><span class="chip ${r.change === 'renamed' ? 'differs' : 'quarantined'}">${r.change === 'renamed' ? 'renamed' : 'missing'}</span></td>
+          <td>${escapeHtml(r.expected_label || '—')}</td>
+          <td>${r.found_label ? escapeHtml(r.found_label) + ` <span style="font-size:11px;color:var(--mut)">(${Math.round(r.similarity * 100)}% similar)</span>` : '<span style="color:var(--mut)">not in the document</span>'}</td>
+          <td style="font-size:12px">${r.source_quote ? '“' + escapeHtml(r.source_quote) + '”' : '—'}</td></tr>`).join('');
+        const found = (c.points || []).filter(p => p.status === 'identified').length;
+        return explain + `<div class="strip">
+            <div><div class="lbl">Document</div><div class="big brand" style="font-size:18px">${escapeHtml(c.file_name)}</div></div>
+            <div><div class="lbl">Matched schema</div><div class="big" style="font-size:15px">${escapeHtml(c.schema || '—')} ${escapeHtml(c.version || '')}</div></div>
+            <div><div class="lbl">Fields found as expected</div><div class="big">${found}/${(c.points || []).length}</div></div>
+          </div>
+          <div class="card"><h2 style="margin-top:0">What changed</h2>
+            <table><thead><tr><th>Data point</th><th>Section</th><th>Change</th><th>Schema expects</th><th>Document has</th><th>Source line</th></tr></thead>
+            <tbody>${rows}</tbody></table>
+            <div style="margin-top:16px;display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+              <button class="act" id="mrcAcceptBtn">Accept &amp; record ${escapeHtml(next)}</button>
+              <button class="ghost" id="mrcReturnBtn">Return to broker</button>
+              <a class="ghost" style="text-decoration:none;padding:7px 12px;border-radius:8px" href="/api/mrc/pdf/${encodeURIComponent(c.doc_id)}" target="_blank" rel="noopener">View PDF ↗</a>
+              <span style="color:var(--mut);font-size:12px">Accepting learns the renamed labels; missing fields stay flagged.</span>
+            </div></div>
+          <script>
+            document.getElementById('mrcAcceptBtn').addEventListener('click', async function(){
+              var b = this; b.disabled = true; b.textContent = 'Recording…';
+              try { await fetchJSON('/api/mrc/accept_changes', {method:'POST', body:{doc_id:'${escapeAttr(c.doc_id)}'}});
+                    toast('New schema version recorded — ingesting the document'); setTimeout(function(){ window.location.hash = '#mrc_inbox'; }, 700); }
+              catch(e) { toast('Could not accept: ' + e.message); b.disabled = false; }
+            });
+            document.getElementById('mrcReturnBtn').addEventListener('click', async function(){
+              var r = await confirm('Return this document to the broker to fix the layout?');
+              if(!r.confirmed){ return; }
+              try { await fetchJSON('/api/mrc/review', {method:'POST', body:{doc_id:'${escapeAttr(c.doc_id)}', action:'return', reason:r.reason}});
+                    toast('Returned to broker — decision recorded'); window.location.hash = '#mrc_inbox'; }
+              catch(e) { toast('Error: ' + e.message); }
             });
           <\/script>`;
       },
 
       'mrc_schemas': async function() {
         const d = await fetchJSON('/api/mrc/schemas');
-        if (!d.schemas.length) {
-          return `<details class="details-summary" open><summary>What am I seeing?</summary>
-            <div class="body">The schema repository — recognised MRC schemas are recorded here.</div></details>
-            <div class="card">No schema registered yet — confirm one in <a href="#mrc_recognition">Schema Recognition</a>.</div>`;
-        }
-        return `<details class="details-summary" open><summary>What am I seeing?</summary>
-            <div class="body">The schema repository. Once an MRC schema is recorded here, every new contract matching it is recognised and flows straight through — no re-mapping.</div></details>` +
-          d.schemas.map(function(s){
-            var pts = Object.keys(JSON.parse(s.field_map || '{}'));
-            return `<div class="card"><h2 style="margin-top:0">${escapeHtml(s.counterparty)} <span class="chip active">${escapeHtml(s.template_version)}</span></h2>
-              <div style="color:var(--mut);margin-bottom:10px">Recorded by ${escapeHtml(s.created_by)} · ${new Date(s.created_at).toLocaleString()} · ${s.field_count} data points</div>
-              <div>${pts.map(k => `<span class="chip plain" style="margin:2px">${escapeHtml(k)}</span>`).join('')}</div></div>`;
-          }).join('');
+        const explain = `<details class="details-summary" open><summary>What am I seeing?</summary>
+            <div class="body">The schema repository. Each schema is identified by a fingerprint (the document title and its section headings) and lists the data points it reads, each bound to an ACORD term. Versions are never edited: accepting a changed layout records a new version that has learned the new labels.</div></details>`;
+        if (!d.schemas.length) return explain + `<div class="card">No schemas recorded.</div>`;
+        return explain + d.schemas.map(sc => {
+          const latest = sc.versions[0];
+          return `<div class="card">
+            <div style="display:flex;justify-content:space-between;align-items:baseline;gap:12px">
+              <h2 style="margin:0">${escapeHtml(sc.name)} <span class="chip active">${escapeHtml(latest.version)}</span></h2>
+              <span style="color:var(--mut);font-size:12px">${sc.contracts} contract${sc.contracts === 1 ? '' : 's'} read with it</span></div>
+            <div style="font-size:12px;color:var(--mut);margin:6px 0 10px">Fingerprint: <b>${escapeHtml(latest.fingerprint.title || '')}</b> · ${escapeHtml((latest.fingerprint.sections || []).join(' · '))}</div>
+            <table style="margin-bottom:12px"><thead><tr><th>Version</th><th>Recorded by</th><th>When</th><th class="num">Data points</th></tr></thead>
+              <tbody>${sc.versions.map(v => `<tr><td><span class="chip ${v === latest ? 'active' : 'plain'}">${escapeHtml(v.version)}</span></td>
+                <td>${escapeHtml(v.created_by)}</td><td>${escapeHtml(new Date(v.created_at).toLocaleString())}</td><td class="num">${v.field_count}</td></tr>`).join('')}</tbody></table>
+            <details><summary style="cursor:pointer;font-weight:600">Data points in ${escapeHtml(latest.version)}</summary>
+              <table style="margin-top:8px"><thead><tr><th>Data point</th><th>Read from</th><th>ACORD term</th><th>CDR field*</th></tr></thead>
+              <tbody>${latest.points.map(p => `<tr><td style="font-weight:600">${escapeHtml(p.label || p.key)}${p.core ? ' <span class="chip plain">core</span>' : ''}</td>
+                <td style="font-size:12px">${escapeHtml(p.section || '')} · “${escapeHtml(p.source_label || '')}”${(p.learned_labels || []).map(l => ` <span class="chip differs">also “${escapeHtml(l)}”</span>`).join('')}</td>
+                <td><code style="font-size:11px">${escapeHtml(p.acord)}</code></td><td style="font-size:12px">${escapeHtml(p.cdr || '—')}</td></tr>`).join('')}</tbody></table></details>
+          </div>`;
+        }).join('');
       },
 
-      'mrc_semantics': async function() {
-        const d = await fetchJSON('/api/mrc/semantics');
-        const rows = d.data_points.map(x => `<tr>
-          <td style="font-weight:600">${escapeHtml(x.data_point)}</td>
-          <td><code>${escapeHtml(x.entity)}.${escapeHtml(x.attribute)}</code></td>
-          <td>${x.core ? '<span class="chip plain">core</span>' : ''}</td>
-          <td><span class="chip ${x.recognised ? 'active' : 'differs'}">${x.recognised ? 'recognised' : 'not yet'}</span></td>
-          <td class="num">${x.instances}</td></tr>`).join('');
-        return `
-          <details class="details-summary" open><summary>What am I seeing?</summary>
-            <div class="body">The ACORD semantics this process uses: every expected data point, the ACORD entity and attribute it binds to, and in how many of the landed contracts we recognised it.</div>
-          </details>
-          <div class="strip">
-            <div><div class="lbl">ACORD coverage</div><div class="big brand">${d.coverage_pct}%</div></div>
-            <div><div class="lbl">Recognised</div><div class="big">${d.recognised}/${d.required}</div></div>
-          </div>
-          <div class="card"><h2 style="margin-top:0">Required vs recognised (ACORD)</h2>
-            <table><thead><tr><th>Data point</th><th>ACORD binding</th><th></th><th>Status</th><th class="num">Contracts</th></tr></thead>
-            <tbody>${rows}</tbody></table></div>`;
-      },
-
-      'config-port': async function() {
-        const d = await fetchJSON('/api/tenant_config?tenant=health_slip');
-        return `
-          <details class="details-summary" open><summary>What am I seeing?</summary>
-            <div class="body">The health renewal-slip is a whole new document family — yet onboarding it added <strong>no new pipeline code</strong>. Everything below (its fields, the carrier's column labels, and how each maps into a governed table) is declared in <strong>one config file</strong>. The same engine that trusts, extracts, reconciles and lands bordereaux handles it. This is the "the entire ingestion front-end is now one config file" proof.</div>
-          </details>
-          <div class="banner">Onboarding the health renewal-slip family = this one file (<code>${escapeHtml(d.path)}</code>, ${d.lines} lines). No new pipeline code.</div>
-          <div class="card">
-            <pre style="background:#f8fafc;padding:16px;border-radius:8px;overflow-x:auto;font:12px ui-monospace,Menlo,monospace;margin:0;color:var(--slate2);line-height:1.5">${escapeHtml(d.config)}</pre>
-          </div>`;
-      },
-      'eval': async function() {
-        const data = await fetchJSON('/api/eval');
-        const overall = data.overall || [];
-        const fields = data.fields || [];
-        if (!data.run_id) {
-          return `<details class="details-summary" open><summary>What am I seeing?</summary>
-            <div class="body">Accuracy of the AI extraction path, scored against synthetic ground truth.</div></details>
-            <div class="card">No eval run yet — run <code>eval/run_eval.py</code>.</div>`;
-        }
-        const models = [...new Set(fields.map(f => f.model))];
-        const fieldNames = [...new Set(fields.map(f => f.field))];
-        const cell = (fn, m) => {
-          const r = fields.find(x => x.field === fn && x.model === m);
-          if (!r) return '<td>—</td>';
-          const pct = (r.accuracy * 100).toFixed(0) + '%';
-          const cls = r.accuracy >= 1 ? 'active' : 'differs';
-          return `<td><span class="chip ${cls}">${pct}</span></td>`;
-        };
-        return `
-          <details class="details-summary" open><summary>What am I seeing?</summary>
-            <div class="body">The AI extraction path maps each source column to a canonical dictionary field. Because we generate the documents, the true mapping is known — so we score it, per field and per model, including decoy columns the model must ignore. This is the answer to "doesn't the model just hallucinate?".</div>
-          </details>
-          <div class="tiles">
-            ${overall.map(o => `<div class="tile"><div class="k">${escapeHtml(o.model)}</div>
-              <div class="v pos">${(o.accuracy * 100).toFixed(0)}%</div>
-              <div class="k">${o.correct}/${o.total} fields${o.mlflow_run_id ? ' · logged to MLflow' : ''}</div></div>`).join('')}
-          </div>
-          <div class="card">
-            <h2>Per-field mapping accuracy — model comparison</h2>
-            <table><thead><tr><th>Field</th>${models.map(m => `<th>${escapeHtml(m)}</th>`).join('')}</tr></thead>
-              <tbody>${fieldNames.map(fn => `<tr><td style="font-weight:600">${escapeHtml(fn)}</td>${models.map(m => cell(fn, m)).join('')}</tr>`).join('')}</tbody>
-            </table>
-          </div>`;
-      },
       'mrc_certainty': async function() {
         const d = await fetchJSON('/api/mrc/certainty');
         const rows = d.rows || [];
@@ -577,7 +614,7 @@
                ${byCcy.map(b => `<div class="tile"><div class="k">Premium (${escapeHtml(b.currency)})</div><div class="v">${fmt(b.premium, b.currency)}</div><div class="k">${b.n} contract${b.n > 1 ? 's' : ''}</div></div>`).join('')}
                ${byCcy.map(b => `<div class="tile"><div class="k">Limits (${escapeHtml(b.currency)})</div><div class="v">${fmt(b.limit_amt, b.currency)}</div></div>`).join('')}
              </div>
-             <div style="font-size:11px;color:var(--mut);margin:-6px 0 14px">Totals are kept per currency — GBP and USD are never added together.</div>`
+             <div style="font-size:11px;color:var(--mut);margin:-6px 0 14px">Open-market contracts only (a binding authority's premium is estimated income). Totals are kept per currency — GBP and USD are never added together.</div>`
           + `<div class="grid2">${premiumCharts}</div>`
           + `<div class="card">
                <h2 style="margin-top:0">Extracted metrics — edit in place</h2>
@@ -612,16 +649,16 @@
           <div class="card">
             <h2>Market Reform Contracts</h2>
             <table>
-              <thead><tr><th>UMR</th><th>Class</th><th>Insured</th><th>Broker</th><th>Slip leader</th><th>Headline limit</th><th>Certainty</th><th></th></tr></thead>
+              <thead><tr><th>UMR</th><th>Schema</th><th>Class</th><th>Insured / coverholder</th><th>Broker</th><th>Slip leader</th><th>Certainty</th><th></th></tr></thead>
               <tbody>
                 ${mrcs.map(m => `
                   <tr>
                     <td style="font-weight:600">${escapeHtml(m.umr)}</td>
+                    <td style="font-size:12px">${escapeHtml((m.schema_name || '').replace("Lloyd's MRC v3 — ", '').replace(' (ACORD)', ''))} ${escapeHtml(m.schema_version || '')}</td>
                     <td>${escapeHtml(m.class_of_business)}</td>
                     <td>${escapeHtml(m.insured_name)}</td>
                     <td>${escapeHtml(m.broker_name)}</td>
                     <td>${escapeHtml(m.slip_leader || '—')}</td>
-                    <td>${escapeHtml(m.headline_limit)}</td>
                     <td><a href="#mrc_certainty"><span class="chip ${m.certainty_status === 'pass' ? 'active' : 'quarantined'}">${m.certainty_status === 'pass' ? 'pass' : (m.checks_failed || 0) + ' failed'}</span></a></td>
                     <td><a href="#mrc_lineage?m=${encodeURIComponent(m.mrc_id)}">lineage →</a></td>
                   </tr>`).join('')}
@@ -1473,12 +1510,14 @@
     }
 
     // Main render
-    async function render() {
+    async function render(quiet) {
       renderNav();
       const hash = (window.location.hash || '#home').slice(1).split('?')[0];
       const viewFn = views[hash] || views.home;
       const app = document.getElementById('app');
-      app.innerHTML = '<div style="position:relative"><span class="spin"></span></div>';
+      // A quiet render (auto-refresh while a step runs) keeps the current page on screen
+      // until the new one is ready, so nothing flickers.
+      if (!quiet) app.innerHTML = '<div style="position:relative"><span class="spin"></span></div>';
       try {
         const html = await viewFn();
         app.innerHTML = html;
@@ -1503,7 +1542,7 @@
     });
 
     // Router
-    window.addEventListener('hashchange', render);
+    window.addEventListener('hashchange', () => render());
     render();
 
     // Footer disclaimer

@@ -41,6 +41,9 @@ def build(cfg):
         ("Total premium by currency",
          f"SELECT premium_currency, count(*) contracts, sum(premium_amount) premium FROM {E} GROUP BY premium_currency ORDER BY premium DESC",
          "Never add premiums across currencies; group by premium_currency."),
+        ("Which schema was each contract read with?",
+         f"SELECT umr, insured_name, schema_name, schema_version FROM {E} ORDER BY schema_name, umr",
+         "schema_name/schema_version come from the schema repository match at intake."),
         ("Which syndicate leads each contract?",
          f"SELECT umr, insured_name, slip_leader FROM {E} ORDER BY umr",
          "slip_leader is the lead syndicate from the Subscription Agreement section."),
@@ -59,6 +62,10 @@ def build(cfg):
                 "Record field). Use it for clauses, exclusions, deductibles, law, syndicates and any 'where did this "
                 "come from' question; list values (clauses, exclusions, security) are in source_quote. "
                 "v_mrc_certainty_latest: one row per contract-certainty check — label, status (pass/fail), detail. "
+                "schema_name + schema_version say which registered schema a contract was read with: "
+                "'Lloyd\'s MRC v3 — Open Market (ACORD)' for open-market contracts, "
+                "'Lloyd\'s MRC v3 — Binding Authority Agreement (ACORD)' for binding authorities (its insured_name is the "
+                "coverholder and its premium is estimated premium income). "
                 "Never sum premiums or limits across currencies. Refer to contracts by UMR and insured name."]}],
             "example_question_sqls": sorted(
                 ({"id": uid(), "question": [q], "sql": [s], "usage_guidance": [g]} for q, s, g in examples),

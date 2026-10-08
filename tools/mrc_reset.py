@@ -1,8 +1,8 @@
 """Reset the MRC flow to its demo starting state (MRC only — other flows untouched).
 
-Clears the recorded MRC schema and every MRC document, projection, check and graph row,
-regenerates the five contracts (dates roll to today) + the cover note, and re-stages them:
-5 awaiting recognition, 1 needs review, no schema recorded.
+Clears the MRC schemas and every MRC document, projection, check, graph row, decision and
+audit event; regenerates the PDFs if asked (dates roll to today); records the open-market
+schema (v1) and registers all eight documents as received, ready for Run intake.
 
 Run:  PYTHONPATH=. uv run --with databricks-sdk,openpyxl python tools/mrc_reset.py
 """
@@ -34,18 +34,21 @@ def _sql_retry(stmt, cfg):
 
 def reset(cfg, regenerate=True):
     from data import generate_mrc
-    from jobs import mrc_pipeline
+    from jobs import mrc_schemas
     F = cfg["full_schema"]
     # Return the governance trail to origin too, so the Audit screen starts clean (the reset
     # is the one sanctioned exception to append-only — it rebuilds the demo, not real history).
     _sql_retry(f"""DELETE FROM {F}.audit_event WHERE entity_id IN (SELECT doc_id FROM {F}.source_document WHERE tenant='mrc')
-            OR entity_type = 'mrc_entities' OR (entity_type = 'template' AND entity_id LIKE '%/mrc')""", cfg)
+            OR entity_type IN ('mrc_entities', 'mrc_inbox') OR (entity_type = 'template' AND entity_id LIKE '%/mrc')""", cfg)
     _sql_retry(f"DELETE FROM {F}.decision WHERE tenant='mrc'", cfg)
     for t, w in MRC_TABLES:
         _sql_retry(f"DELETE FROM {F}.{t} WHERE {w}", cfg)
     if regenerate:
         generate_mrc.upload(cfg, generate_mrc.generate())
-    mrc_pipeline.process_mrc_inbox(cfg)
+    # The demo starts with one schema already in the repository, and every document received
+    # but not yet read — pressing Run intake does the reading and routing live.
+    mrc_schemas.preregister_open_market(cfg)
+    mrc_schemas.receive_inbox(cfg)
     states = sql(f"SELECT inbound_state, count(*) FROM {F}.source_document WHERE tenant='mrc' GROUP BY 1", cfg=cfg)
     print("MRC reset:", {k: int(v) for k, v in states})
     return states

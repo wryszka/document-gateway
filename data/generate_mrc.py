@@ -198,6 +198,24 @@ POLICIES = [
      "security": [("2003", "AXA XL Underwriting Agencies Ltd", 50.0), ("2010", "Lancashire Syndicates Ltd", 40.0),
                   ("2001", "MS Amlin Underwriting Ltd", 35.0)],
      "country": "United Kingdom", "brokerage": "10.00%"},
+    {"filename": "mrc_policy_006.pdf", "ref": "006", "months_ago": 2,
+     "broker": {"name": "Marsh Ltd", "number": "0572"},
+     "type": "Construction All Risks", "ccy": "GBP",
+     "insured": {"name": "Ashgrove Developments Ltd", "address": "8 Canal Street, Manchester M1 3HE, United Kingdom"},
+     "interest": "Contract works, plant and equipment for a mixed-use development",
+     "situation": "United Kingdom",
+     "limits": ["GBP 40,000,000 any one occurrence (Contract Works)", "GBP 2,500,000 any one occurrence (Plant)"],
+     "deductible": "GBP 50,000 each and every loss; GBP 250,000 defects",
+     "premium": "GBP 640,000 for the period, adjustable",
+     "conditions": ["LMA5218 - Sanction Limitation and Exclusion Clause", "LMA5401 - Property Cyber and Data Exclusion"],
+     "exclusions": ["Defective design (LEG 2/96 applies)", "Wear and tear", "Contractual penalties"],
+     "law": "English law; courts of England and Wales (exclusive)",
+     "security": [("1414", "Ascot Underwriting Ltd", 50.0), ("2010", "Lancashire Syndicates Ltd", 40.0),
+                  ("1084", "Chaucer Syndicates Ltd", 35.0)],
+     "country": "United Kingdom", "brokerage": "15.00%",
+     # This broker's layout has drifted from the recorded schema: two labels renamed, two fields left out.
+     "drift": {"rename": {"Unique Market Reference": "Unique Market Ref", "Premium": "Gross Premium"},
+               "omit": ["Choice of Law and Jurisdiction", "Settlement Due Date"]}},
 ]
 
 
@@ -228,14 +246,23 @@ def _signed(security, ccy_short_order=None):
 def generate_pdf(policy, out_dir, as_of=None):
     inc, exp, settle, inc_d = _period(policy["months_ago"], as_of)
     umr = f"B{policy['broker']['number']}{inc_d.strftime('%y')}LL{policy['ref']}"
+    drift = policy.get("drift", {})
+    rename, omit = drift.get("rename", {}), set(drift.get("omit", []))
     pdf = SimplePDF()
+    _add = pdf.add_text
+
+    def field(label, value):  # one 'Label: value' line, honouring the policy's drift
+        if label in omit:
+            return
+        _add(f"{rename.get(label, label)}: {value}")
+    pdf.field = field
     pdf.add_heading("MARKET REFORM CONTRACT", size=14)
     pdf.add_text(f"Broker: {policy['broker']['name']}")
     pdf.add_text(f"Lloyd's Broker Number: {policy['broker']['number']}")
     pdf.add_text(f"Broker Reference: MRC-{inc_d.year}-LL-{policy['ref']}")
     pdf.add_separator()
     pdf.add_heading("RISK DETAILS", size=13)
-    pdf.add_text(f"Unique Market Reference: {umr}")
+    field("Unique Market Reference", umr)
     pdf.add_text(f"Type: {policy['type']}")
     pdf.add_text(f"Insured: {policy['insured']['name']}")
     pdf.add_text(f"Insured Address: {policy['insured']['address']}")
@@ -246,14 +273,14 @@ def generate_pdf(policy, out_dir, as_of=None):
     for lim in policy["limits"]:
         pdf.add_text(f"- {lim}")
     pdf.add_text(f"Deductible: {policy['deductible']}")
-    pdf.add_text(f"Premium: {policy['premium']}")
+    field("Premium", policy["premium"])
     pdf.add_text("Conditions:")
     for cl in policy["conditions"]:
         pdf.add_text(f"- {cl}")
     pdf.add_text("Exclusions:")
     for ex in policy["exclusions"]:
         pdf.add_text(f"- {ex}")
-    pdf.add_text(f"Choice of Law and Jurisdiction: {policy['law']}")
+    field("Choice of Law and Jurisdiction", policy["law"])
     pdf.add_text("Subjectivities: None")
     pdf.add_separator()
     pdf.add_heading("INFORMATION", size=13)
@@ -272,7 +299,7 @@ def generate_pdf(policy, out_dir, as_of=None):
     pdf.add_text(f"Slip Leader: Syndicate {lead_num} ({lead_agent})")
     pdf.add_text("Basis of Agreement to Contract Changes: General Underwriters Agreement (GUA)")
     pdf.add_text("Basis of Claims Agreement: Lloyd's Claims Scheme")
-    pdf.add_text(f"Settlement Due Date: {settle}")
+    field("Settlement Due Date", settle)
     pdf.add_separator()
     pdf.add_heading("FISCAL AND REGULATORY", size=13)
     pdf.add_text(f"Country of Origin: {policy['country']}")
@@ -285,6 +312,80 @@ def generate_pdf(policy, out_dir, as_of=None):
     path = os.path.join(out_dir, policy["filename"])
     pdf.save(path)
     return path
+
+
+BINDING_AUTHORITY = {
+    "filename": "mrc_binding_authority_007.pdf", "ref": "007", "months_ago": 4,
+    "broker": {"name": "Lockton Companies LLP", "number": "0950"},
+    "coverholder": "Harbourline Underwriting", "coverholder_pin": "CH-8801",
+    "classes": ["Commercial Property", "Commercial Combined (package)", "Public and Products Liability"],
+    "territory": "United Kingdom",
+    "max_line": "GBP 5,000,000 any one risk",
+    "epi": "GBP 4,000,000 estimated premium income for the period",
+    "reporting": "Premium and claims bordereaux monthly, within 30 days of month end",
+    "claims_authority": "Coverholder may settle claims up to GBP 25,000",
+    "conditions": ["LMA5218 - Sanction Limitation and Exclusion Clause",
+                   "Lloyd's Coverholder Reporting Standards apply"],
+    "law": "English law; courts of England and Wales (exclusive)",
+    "security": [("33", "Hiscox Syndicates Ltd", 50.0), ("623", "Beazley Furlonge Ltd", 40.0),
+                 ("2987", "Brit Syndicates Ltd", 35.0)],
+    "country": "United Kingdom", "brokerage": "7.50%",
+}
+
+
+def generate_binding_authority(out_dir, as_of=None):
+    """A Lloyd's MRC for a binding authority: the same market structure, a different
+    document type (title + fields), so the gateway has no schema for it yet."""
+    b = BINDING_AUTHORITY
+    inc, exp, settle, inc_d = _period(b["months_ago"], as_of)
+    umr = f"B{b['broker']['number']}{inc_d.strftime('%y')}BA{b['ref']}"
+    pdf = SimplePDF()
+    pdf.add_heading("MARKET REFORM CONTRACT - BINDING AUTHORITY AGREEMENT", size=14)
+    pdf.add_text(f"Broker: {b['broker']['name']}")
+    pdf.add_text(f"Lloyd's Broker Number: {b['broker']['number']}")
+    pdf.add_text(f"Broker Reference: BA-{inc_d.year}-{b['ref']}")
+    pdf.add_separator()
+    pdf.add_heading("RISK DETAILS", size=13)
+    pdf.add_text(f"Unique Market Reference: {umr}")
+    pdf.add_text("Type: Binding Authority Agreement")
+    pdf.add_text(f"Coverholder: {b['coverholder']}")
+    pdf.add_text(f"Coverholder Reference: {b['coverholder_pin']}")
+    pdf.add_text(f"Period: From {inc} to {exp}, both days inclusive")
+    pdf.add_text("Classes of Business Authorised:")
+    for c in b["classes"]:
+        pdf.add_text(f"- {c}")
+    pdf.add_text(f"Territorial Limits: {b['territory']}")
+    pdf.add_text(f"Maximum Line Size: {b['max_line']}")
+    pdf.add_text(f"Estimated Premium Income: {b['epi']}")
+    pdf.add_text(f"Bordereaux Reporting: {b['reporting']}")
+    pdf.add_text(f"Claims Authority: {b['claims_authority']}")
+    pdf.add_text("Conditions:")
+    for c in b["conditions"]:
+        pdf.add_text(f"- {c}")
+    pdf.add_text(f"Choice of Law and Jurisdiction: {b['law']}")
+    pdf.add_separator()
+    pdf.add_heading("INFORMATION", size=13)
+    pdf.add_text("Coverholder approval, business plan and audit reports held on file.")
+    pdf.add_separator()
+    pdf.add_heading("SECURITY DETAILS", size=13)
+    pdf.add_text("Insurer's Liability: LSW1001 (Several Liability Notice)")
+    pdf.add_text("Order Hereon: 100% of 100%")
+    for num, agent, w, sgn in _signed(b["security"]):
+        pdf.add_text(f"Syndicate {num} ({agent}) | Written Line: {w:.2f}% | Signed Line: {sgn:.2f}%")
+    pdf.add_separator()
+    pdf.add_heading("SUBSCRIPTION AGREEMENT", size=13)
+    lead_num, lead_agent, _ = b["security"][0]
+    pdf.add_text(f"Slip Leader: Syndicate {lead_num} ({lead_agent})")
+    pdf.add_text(f"Settlement Due Date: {settle}")
+    pdf.add_separator()
+    pdf.add_heading("FISCAL AND REGULATORY", size=13)
+    pdf.add_text(f"Country of Origin: {b['country']}")
+    pdf.add_text("Regulatory Client Classification: Large Risk")
+    pdf.add_separator()
+    pdf.add_heading("BROKER REMUNERATION AND DEDUCTIONS", size=13)
+    pdf.add_text(f"Total Brokerage: {b['brokerage']}")
+    pdf.save(os.path.join(out_dir, b["filename"]))
+    return b["filename"]
 
 
 def generate_nonconforming(out_dir):
@@ -329,6 +430,7 @@ def generate():
     for p in POLICIES:
         generate_pdf(p, OUT)
         names.append(p["filename"])
+    names.append(generate_binding_authority(OUT))  # a new document type -> new schema
     names.append(generate_nonconforming(OUT))  # the 'not recognised -> HITL' document
     print(f"generated {len(names)} MRC PDFs in {OUT} (incl. 1 non-conforming)")
     return names
