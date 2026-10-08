@@ -78,17 +78,21 @@
     const FLOWS = {
       mrc: {label:'Market Reform Contract', short:'MRC', icon:'📜', sub:'Lloyd\'s MRC v3 · open market',
         views:[
-          {id:'mrc_inbox', label:'Inbox', icon:'📥'},
+          {id:'mrc_inbox', label:'Intake', icon:'📥'},
           {id:'mrc_schemas', label:'Schemas', icon:'🗄️'},
           {id:'mrc_recognition', label:'Schema Recognition', hidden:true, parent:'mrc_schemas'},
           {id:'mrc_changes', label:'Schema Changes', hidden:true, parent:'mrc_schemas'},
-          {id:'mrc_certainty', label:'Contract Certainty', icon:'✅'},
-          {id:'mrc_cdr', label:'Core Data Record', icon:'🧾'},
-          {id:'mrc_lineage', label:'Lineage', icon:'🔗'},
-          {id:'mrc_metrics', label:'Metrics', icon:'📈'},
-          {id:'mrc', label:'Contracts & Ask', icon:'💬'},
-          {id:'mrc_semantics', label:'ACORD Semantics', icon:'🔤'},
-          {id:'mrc_audit', label:'Audit', icon:'🔍'},
+          {id:'mrc_semantics', label:'Vocabulary', hidden:true, parent:'mrc_schemas'},
+          {id:'mrc_contracts', label:'Contracts', icon:'📜'},
+          {id:'mrc_contract', label:'Contract', hidden:true, parent:'mrc_contracts'},
+          {id:'mrc_certainty', label:'Contract Certainty', hidden:true, parent:'mrc_contracts'},
+          {id:'mrc_lineage', label:'Lineage', hidden:true, parent:'mrc_contracts'},
+          {id:'mrc_analytics', label:'Analytics', icon:'📈'},
+          {id:'mrc_metrics', label:'Metrics', hidden:true, parent:'mrc_analytics'},
+          {id:'mrc_cdr', label:'Core Data Record', hidden:true, parent:'mrc_analytics'},
+          {id:'mrc', label:'Contracts & Ask', hidden:true, parent:'mrc_analytics'},
+          {id:'mrc_governance', label:'Governance', icon:'🛡️'},
+          {id:'mrc_audit', label:'Audit', hidden:true, parent:'mrc_governance'},
           {id:'learn', label:'Learn', icon:'ℹ️'}
         ]},
       bordereaux: {label:'Bordereaux', short:'Bordereaux', icon:'📊', sub:'Delegated authority · premium & claims',
@@ -113,13 +117,36 @@
     const FLOW_ORDER = ['mrc','bordereaux','health_slip'];
     function flowForView(id){ for(const f of FLOW_ORDER){ if(FLOWS[f].views.some(v=>v.id===id)) return f; } return null; }
 
+    // Agent output is plain markdown; render a safe subset (escape first, then format).
+    function md(text) {
+      const lines = escapeHtml(text || '').split('\n');
+      let html = '', inList = false;
+      const inline = t => t.replace(/\*\*(.+?)\*\*/g, '<b>$1</b>');
+      for (const raw of lines) {
+        const l = raw.trim();
+        if (/^[-*] /.test(l)) { if (!inList) { html += '<ul style="margin:6px 0 10px 18px">'; inList = true; } html += '<li>' + inline(l.slice(2)) + '</li>'; continue; }
+        if (inList) { html += '</ul>'; inList = false; }
+        if (/^#{1,4} /.test(l)) html += '<div style="font-weight:700;margin:12px 0 4px">' + inline(l.replace(/^#+ /, '')) + '</div>';
+        else if (l) html += '<p style="margin:6px 0">' + inline(l) + '</p>';
+      }
+      if (inList) html += '</ul>';
+      return html;
+    }
+    function agentPanel(id, title, desc, btn) {
+      return `<div class="card" style="border-left:4px solid #7c3aed">
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:12px">
+          <div><div style="font-weight:700">🤖 ${escapeHtml(title)}</div><div style="font-size:12px;color:var(--mut)">${escapeHtml(desc)}</div></div>
+          <button class="ghost" id="${id}Btn">${escapeHtml(btn)}</button></div>
+        <div id="${id}Out" style="margin-top:8px;font-size:13px"></div></div>`;
+    }
+
     // Tabs shared by the three schema screens. Counts show what is waiting.
     async function schemaTabs(active) {
       let st = {};
       try { st = ((await (await fetch('/api/mrc/progress')).json()).states) || {}; } catch (e) {}
       const tab = (id, label, n) => `<a href="#${id}" style="display:inline-block;padding:9px 16px;margin-right:4px;border-radius:9px 9px 0 0;text-decoration:none;font-weight:600;
           ${active === id ? 'background:var(--card);color:var(--ink);border:1px solid var(--line);border-bottom-color:var(--card)' : 'color:var(--mut)'}">${label}${n ? ` <span class="chip differs" style="margin-left:4px">${n}</span>` : ''}</a>`;
-      return `<div style="border-bottom:1px solid var(--line);margin-bottom:16px">${tab('mrc_schemas', 'Repository', 0)}${tab('mrc_recognition', 'Recognition', st.new_schema || 0)}${tab('mrc_changes', 'Changes', st.schema_changed || 0)}</div>`;
+      return `<div style="border-bottom:1px solid var(--line);margin-bottom:16px">${tab('mrc_schemas', 'Repository', 0)}${tab('mrc_recognition', 'Recognition', st.new_schema || 0)}${tab('mrc_changes', 'Changes', st.schema_changed || 0)}${tab('mrc_semantics', 'Vocabulary', 0)}</div>`;
     }
 
     // Fetch helper with loading state
@@ -280,6 +307,7 @@
             <div class="tile"><div class="k">Not an MRC</div><div class="v neg">${c.unrecognised || 0}</div></div>
             <div class="tile"><div class="k">Schemas in repository</div><div class="v">${d.schemas || 0}</div></div>
           </div>
+          ${(c.recognised || 0) > 0 && !busy ? agentPanel('mrcIntakeAgent', 'Intake review agent', 'Reads what landed and what was flagged, and says what needs a person. Advises only — every review is logged.', 'Review this intake') : ''}
           <div id="mrcPdfViewer"></div>
           <div class="card"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
             <h2 style="margin:0">Documents</h2>
@@ -292,6 +320,15 @@
               <td><span class="chip ${m(x.inbound_state)[0]}">${escapeHtml(m(x.inbound_state)[1])}</span></td>
               <td style="white-space:nowrap"><button class="ghost" data-mrc-view="${escapeAttr(x.doc_id)}" data-name="${escapeAttr(x.file_name)}">View</button> ${act(x)}</td></tr>`).join('')}</tbody></table></div>
           <script>
+            var ab = document.getElementById('mrcIntakeAgentBtn');
+            if (ab) { ab.addEventListener('click', async function(){
+              var out = document.getElementById('mrcIntakeAgentOut');
+              ab.disabled = true; out.innerHTML = '<span class="spin"></span> The agent is reviewing the intake…';
+              try { var r = await fetchJSON('/api/mrc/agent/intake_review', {method:'POST', body:{}});
+                    out.innerHTML = md(r.review) + '<div style="font-size:11px;color:var(--mut);margin-top:6px">Logged as ' + escapeHtml(r.note_id) + ' · advises only · see Governance</div>'; }
+              catch(e) { out.innerHTML = '<div class="error-banner">' + escapeHtml(e.message) + '</div>'; }
+              ab.disabled = false;
+            }); }
             var ib = document.getElementById('mrcIntakeBtn');
             if (ib) { ib.addEventListener('click', async function(){
               ib.disabled = true; ib.textContent = 'Starting…';
@@ -395,12 +432,28 @@
             <table><thead><tr><th></th><th>Field</th><th>Section</th><th style="min-width:200px">Value · source line</th><th>ACORD term</th><th>CDR field*</th><th>Mapping</th><th>Note</th></tr></thead>
             <tbody>${rows}</tbody></table>
             <div style="font-size:11px;color:var(--mut);margin-top:8px">* Indicative Lloyd's Core Data Record field — a paraphrased crosswalk for discussion, not the published specification. Values are read by section and label; the model only proposes the mapping for unfamiliar fields.</div>
+            <div style="margin-top:14px">${agentPanel('mrcSchemaAgent', 'Schema review agent', 'Critiques this proposed schema before you record it — duplicates, weak mappings, gaps a Core Data Record would need. Advises only.', 'Review this schema')}</div>
             <div style="margin-top:16px;display:flex;align-items:center;gap:12px">
               <button class="act" id="mrcConfirmBtn">Confirm &amp; record schema</button>
               <span style="color:var(--mut);font-size:12px">Records the schema as v1 in the repository and ingests this document with it.</span>
             </div>
           </div>
           <script>
+            document.getElementById('mrcSchemaAgentBtn').addEventListener('click', async function(){
+              var p = window.__mrcProposal, b = this, out = document.getElementById('mrcSchemaAgentOut');
+              var fields = p.fields.map(function(f, i){
+                return {field: f.label, section: f.section, value: f.value, origin: f.origin, confidence: f.confidence,
+                        include: document.querySelector('[data-inc="' + i + '"]').checked,
+                        acord_term: document.querySelector('[data-bind="' + i + '"]').value || null, cdr: f.cdr};
+              });
+              b.disabled = true; out.innerHTML = '<span class="spin"></span> The agent is reviewing the proposed schema…';
+              try { var r = await fetchJSON('/api/mrc/agent/schema_review', {method:'POST', body:{kind:'recognition', payload:{
+                        file_name: p.file_name, fingerprint: p.fingerprint, name: document.getElementById('mrcSchemaName').value,
+                        description: document.getElementById('mrcSchemaDesc').value, fields: fields}}});
+                    out.innerHTML = md(r.review) + '<div style="font-size:11px;color:var(--mut);margin-top:6px">Logged as ' + escapeHtml(r.note_id) + ' · advises only</div>'; }
+              catch(e) { out.innerHTML = '<div class="error-banner">' + escapeHtml(e.message) + '</div>'; }
+              b.disabled = false;
+            });
             document.getElementById('mrcConfirmBtn').addEventListener('click', async function(){
               var p = window.__mrcProposal, b = this;
               var fields = p.fields.map(function(f, i){
@@ -456,6 +509,7 @@
         }).join('');
         const found = (c.points || []).filter(p => p.status === 'identified').length;
         window.__mrcChangesDoc = c.doc_id;
+        window.__mrcChanges = c;
         return tabs + explain + `<div class="strip">
             <div><div class="lbl">Document</div><div class="big brand" style="font-size:18px">${escapeHtml(c.file_name)}</div></div>
             <div><div class="lbl">Matched schema</div><div class="big" style="font-size:15px">${escapeHtml(c.schema || '—')} ${escapeHtml(c.version || '')}</div></div>
@@ -468,6 +522,7 @@
               <label for="mrcChangeNote" style="font-weight:600;display:block;margin-bottom:4px">Change note — why this version is being recorded</label>
               <textarea id="mrcChangeNote" rows="2" placeholder="e.g. Marsh's construction template renames two fields; governing law and settlement date to be chased with the broker." style="width:100%;padding:8px;border:1px solid var(--line2);border-radius:8px;font:inherit"></textarea>
             </div>
+            ${agentPanel('mrcChangeAgent', 'Schema review agent', 'Checks the proposed amendment — does each rename keep its meaning, which gaps matter, what to ask the broker. Advises only.', 'Review these changes')}
             <div style="margin-top:12px;display:flex;align-items:center;gap:10px;flex-wrap:wrap">
               <button class="act" id="mrcAcceptBtn">Accept &amp; record ${escapeHtml(next)}</button>
               <button class="ghost" id="mrcReturnBtn">Return to broker</button>
@@ -480,6 +535,21 @@
                 var m = document.querySelector('[data-map="' + sel.getAttribute('data-dec') + '"]');
                 m.disabled = sel.value !== 'map';
               });
+            });
+            document.getElementById('mrcChangeAgentBtn').addEventListener('click', async function(){
+              var c = window.__mrcChanges, b = this, out = document.getElementById('mrcChangeAgentOut'), decisions = {};
+              document.querySelectorAll('[data-dec]').forEach(function(sel){
+                var k = sel.getAttribute('data-dec');
+                decisions[k] = {action: sel.value, mapped_to: document.querySelector('[data-map="' + k + '"]').value || null,
+                                note: document.querySelector('[data-dnote="' + k + '"]').value || ''};
+              });
+              b.disabled = true; out.innerHTML = '<span class="spin"></span> The agent is reviewing the amendment…';
+              try { var r = await fetchJSON('/api/mrc/agent/schema_review', {method:'POST', body:{kind:'changes', payload:{
+                        file_name: c.file_name, schema: c.schema, version: c.version, changes: c.diff, decisions: decisions,
+                        change_note: document.getElementById('mrcChangeNote').value}}});
+                    out.innerHTML = md(r.review) + '<div style="font-size:11px;color:var(--mut);margin-top:6px">Logged as ' + escapeHtml(r.note_id) + ' · advises only</div>'; }
+              catch(e) { out.innerHTML = '<div class="error-banner">' + escapeHtml(e.message) + '</div>'; }
+              b.disabled = false;
             });
             document.getElementById('mrcAcceptBtn').addEventListener('click', async function(){
               var b = this, decisions = {}, problem = null;
@@ -533,6 +603,227 @@
                 <td style="font-size:12px;color:var(--mut)">${escapeHtml(p.note || '')}</td></tr>`).join('')}</tbody></table></details>
           </div>`;
         }).join('');
+      },
+
+      'mrc_semantics': async function() {
+        const d = await fetchJSON('/api/mrc/semantics');
+        const tabs = await schemaTabs('mrc_semantics');
+        const rows = d.data_points.map(x => `<tr>
+          <td style="font-weight:600">${escapeHtml(x.data_point)}</td>
+          <td><code>${escapeHtml(x.entity)}.${escapeHtml(x.attribute)}</code></td>
+          <td>${x.core ? '<span class="chip plain">core</span>' : ''}</td>
+          <td><span class="chip ${x.recognised ? 'active' : 'differs'}">${x.recognised ? 'recognised' : 'not yet'}</span></td>
+          <td class="num">${x.instances}</td></tr>`).join('');
+        return tabs + `
+          <details class="details-summary" open><summary>What am I seeing?</summary>
+            <div class="body">The ACORD semantics this process uses: every expected data point, the ACORD entity and attribute it binds to, and in how many of the landed contracts we recognised it.</div>
+          </details>
+          <div class="strip">
+            <div><div class="lbl">ACORD coverage</div><div class="big brand">${d.coverage_pct}%</div></div>
+            <div><div class="lbl">Recognised</div><div class="big">${d.recognised}/${d.required}</div></div>
+          </div>
+          <div class="card"><h2 style="margin-top:0">Required vs recognised (ACORD)</h2>
+            <table><thead><tr><th>Data point</th><th>ACORD binding</th><th></th><th>Status</th><th class="num">Contracts</th></tr></thead>
+            <tbody>${rows}</tbody></table></div>`;
+      },
+
+      'config-port': async function() {
+        const d = await fetchJSON('/api/tenant_config?tenant=health_slip');
+        return `
+          <details class="details-summary" open><summary>What am I seeing?</summary>
+            <div class="body">The health renewal-slip is a whole new document family — yet onboarding it added <strong>no new pipeline code</strong>. Everything below (its fields, the carrier's column labels, and how each maps into a governed table) is declared in <strong>one config file</strong>. The same engine that trusts, extracts, reconciles and lands bordereaux handles it. This is the "the entire ingestion front-end is now one config file" proof.</div>
+          </details>
+          <div class="banner">Onboarding the health renewal-slip family = this one file (<code>${escapeHtml(d.path)}</code>, ${d.lines} lines). No new pipeline code.</div>
+          <div class="card">
+            <pre style="background:#f8fafc;padding:16px;border-radius:8px;overflow-x:auto;font:12px ui-monospace,Menlo,monospace;margin:0;color:var(--slate2);line-height:1.5">${escapeHtml(d.config)}</pre>
+          </div>`;
+      },
+      'eval': async function() {
+        const data = await fetchJSON('/api/eval');
+        const overall = data.overall || [];
+        const fields = data.fields || [];
+        if (!data.run_id) {
+          return `<details class="details-summary" open><summary>What am I seeing?</summary>
+            <div class="body">Accuracy of the AI extraction path, scored against synthetic ground truth.</div></details>
+            <div class="card">No eval run yet — run <code>eval/run_eval.py</code>.</div>`;
+        }
+        const models = [...new Set(fields.map(f => f.model))];
+        const fieldNames = [...new Set(fields.map(f => f.field))];
+        const cell = (fn, m) => {
+          const r = fields.find(x => x.field === fn && x.model === m);
+          if (!r) return '<td>—</td>';
+          const pct = (r.accuracy * 100).toFixed(0) + '%';
+          const cls = r.accuracy >= 1 ? 'active' : 'differs';
+          return `<td><span class="chip ${cls}">${pct}</span></td>`;
+        };
+        return `
+          <details class="details-summary" open><summary>What am I seeing?</summary>
+            <div class="body">The AI extraction path maps each source column to a canonical dictionary field. Because we generate the documents, the true mapping is known — so we score it, per field and per model, including decoy columns the model must ignore. This is the answer to "doesn't the model just hallucinate?".</div>
+          </details>
+          <div class="tiles">
+            ${overall.map(o => `<div class="tile"><div class="k">${escapeHtml(o.model)}</div>
+              <div class="v pos">${(o.accuracy * 100).toFixed(0)}%</div>
+              <div class="k">${o.correct}/${o.total} fields${o.mlflow_run_id ? ' · logged to MLflow' : ''}</div></div>`).join('')}
+          </div>
+          <div class="card">
+            <h2>Per-field mapping accuracy — model comparison</h2>
+            <table><thead><tr><th>Field</th>${models.map(m => `<th>${escapeHtml(m)}</th>`).join('')}</tr></thead>
+              <tbody>${fieldNames.map(fn => `<tr><td style="font-weight:600">${escapeHtml(fn)}</td>${models.map(m => cell(fn, m)).join('')}</tr>`).join('')}</tbody>
+            </table>
+          </div>`;
+      },
+      'mrc_contracts': async function() {
+        const d = await fetchJSON('/api/mrc/contracts');
+        const rows = d.contracts || [];
+        const short = n => (n || '').replace("Lloyd's MRC v3 — ", '').replace(' (ACORD)', '');
+        const explain = `<details class="details-summary" open><summary>What am I seeing?</summary>
+            <div class="body">Every contract that has been read and loaded. Search by insured, coverholder, broker, class, syndicate or UMR; open any contract to see its checks, every value with the line it came from, its Core Data Record fields, the PDF and its history.</div></details>`;
+        if (!rows.length) return explain + `<div class="card">No contracts loaded yet — <a href="#mrc_inbox">Run intake</a> first.</div>`;
+        const attention = rows.filter(r => r.certainty_status !== 'pass').length;
+        return explain + `<div class="card" style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+            <input id="mrcSearch" aria-label="Search contracts" placeholder="Search — e.g. marine, Willis, Hiscox, B0425…" style="flex:1;min-width:260px;padding:9px;border:1px solid var(--line2);border-radius:8px">
+            <button class="ghost" data-filter="all">All (${rows.length})</button>
+            <button class="ghost" data-filter="attention">Needs attention (${attention})</button></div>
+          <div class="card"><table><thead><tr><th>UMR</th><th>Insured / coverholder</th><th>Class</th><th>Broker</th><th>Lead</th><th class="num">Premium</th><th>Certainty</th><th>Schema</th></tr></thead>
+          <tbody>${rows.map(r => `<tr class="row" style="cursor:pointer" data-href="#mrc_contract?m=${encodeURIComponent(r.mrc_id)}"
+               data-att="${r.certainty_status !== 'pass' ? '1' : '0'}"
+               data-text="${escapeAttr([r.umr, r.insured_name, r.class_of_business, r.broker_name, r.slip_leader, r.syndicates, r.schema_name].join(' ').toLowerCase())}">
+            <td style="font-weight:600">${escapeHtml(r.umr)}</td><td>${escapeHtml(r.insured_name)}</td><td>${escapeHtml(r.class_of_business)}</td>
+            <td>${escapeHtml(r.broker_name)}</td><td style="font-size:12px">${escapeHtml((r.slip_leader || '').replace(/\s*\(.*\)/, ''))}</td>
+            <td class="num">${r.premium_amount ? formatMoney(Number(r.premium_amount), r.premium_currency) : '—'}</td>
+            <td><span class="chip ${r.certainty_status === 'pass' ? 'active' : 'quarantined'}">${r.certainty_status === 'pass' ? 'pass' : (r.checks_failed || 0) + ' failed'}</span></td>
+            <td style="font-size:12px">${escapeHtml(short(r.schema_name))} ${escapeHtml(r.schema_version || '')}</td></tr>`).join('')}</tbody></table>
+          <div id="mrcNoMatch" style="display:none;color:var(--mut);padding:10px">No contracts match.</div></div>
+          <script>
+            var mode = 'all';
+            function applyFilter(){
+              var terms = (document.getElementById('mrcSearch').value || '').toLowerCase().split(/\s+/).filter(Boolean), shown = 0;
+              document.querySelectorAll('tr[data-text]').forEach(function(tr){
+                var t = tr.getAttribute('data-text'), ok = terms.every(function(w){ return t.indexOf(w) >= 0; });
+                if (mode === 'attention' && tr.getAttribute('data-att') !== '1') { ok = false; }
+                tr.style.display = ok ? '' : 'none'; if (ok) { shown++; }
+              });
+              document.getElementById('mrcNoMatch').style.display = shown ? 'none' : 'block';
+            }
+            document.getElementById('mrcSearch').addEventListener('input', applyFilter);
+            document.querySelectorAll('[data-filter]').forEach(function(b){ b.addEventListener('click', function(){ mode = b.getAttribute('data-filter'); applyFilter(); }); });
+            document.querySelectorAll('tr[data-href]').forEach(function(tr){ tr.addEventListener('click', function(){ window.location.hash = tr.getAttribute('data-href'); }); });
+          <\/script>`;
+      },
+
+      'mrc_contract': async function() {
+        const qs = new URLSearchParams((window.location.hash.split('?')[1]) || '');
+        const m = qs.get('m');
+        if (!m) return `<div class="card">Choose a contract from <a href="#mrc_contracts">Contracts</a>.</div>`;
+        const d = await fetchJSON('/api/mrc/contract?mrc_id=' + encodeURIComponent(m));
+        const c = d.contract, fails = d.checks.filter(x => x.status === 'fail');
+        const fact = (k, v) => `<div><div class="lbl" style="font-size:11px;color:var(--mut);text-transform:uppercase;letter-spacing:.05em">${k}</div><div style="font-weight:600">${escapeHtml(v || '—')}</div></div>`;
+        const sec = (id, html) => `<div data-csec="${id}" style="${id === 'overview' ? '' : 'display:none'}">${html}</div>`;
+        const tabBtn = (id, label) => `<button class="ghost" data-ctab="${id}" style="margin-right:4px">${label}</button>`;
+        const cdr = d.values.filter(v => v.cdr_field);
+        return `<div style="margin-bottom:10px"><a href="#mrc_contracts">← All contracts</a></div>
+          <div class="strip">
+            <div><div class="lbl">${escapeHtml(c.class_of_business)}</div><div class="big brand" style="font-size:20px">${escapeHtml(c.insured_name)}</div></div>
+            <div><div class="lbl">UMR</div><div class="big" style="font-size:18px">${escapeHtml(c.umr)}</div></div>
+            <div><div class="lbl">Premium</div><div class="big" style="font-size:18px">${c.premium_amount ? formatMoney(Number(c.premium_amount), c.premium_currency) : '—'}</div></div>
+            <div><div class="lbl">Certainty</div><div class="big ${fails.length ? 'neg' : 'pos'}" style="font-size:18px">${fails.length ? fails.length + ' failed' : 'all pass'}</div></div>
+          </div>
+          <div style="margin:10px 0 14px">${tabBtn('overview','Overview')}${tabBtn('certainty','Certainty')}${tabBtn('values','Values &amp; lineage')}${tabBtn('cdr','Core Data Record')}${tabBtn('doc','Document')}${tabBtn('history','History')}</div>
+          ${sec('overview', `<div class="card"><div style="display:grid;grid-template-columns:repeat(3,1fr);gap:16px">
+              ${fact('Broker', c.broker_name)}${fact('Slip leader', c.slip_leader)}${fact('Signed lines', c.signed_lines_total ? Number(c.signed_lines_total).toFixed(2) + '%' : '')}
+              ${fact('Period', (c.inception_date || '') + ' – ' + (c.expiry_date || ''))}${fact('Situation / territory', c.situation)}${fact('Governing law', c.choice_of_law)}
+              ${fact('Headline limit', c.headline_limit)}${fact('Deductible', c.deductible_text)}${fact('Premium (as written)', c.premium_text)}
+              ${fact('Schema', (c.schema_name || '') + ' ' + (c.schema_version || ''))}${fact('Source document', c.file_name)}${fact('Loaded', String(c.ingested_at || '').slice(0, 16).replace('T', ' '))}
+            </div>${fails.length ? `<div class="banner" style="margin-top:14px">Needs attention: ${fails.map(f => escapeHtml(f.label)).join(' · ')}</div>` : ''}</div>`)}
+          ${sec('certainty', `<div class="card"><table><tbody>${d.checks.map(x => `<tr>
+              <td style="width:100px"><span class="chip ${x.status === 'pass' ? 'active' : 'quarantined'}">${x.status === 'pass' ? '✓ pass' : '✗ fail'}</span></td>
+              <td style="font-weight:600">${escapeHtml(x.label)}</td><td style="font-size:12px;color:var(--mut)">${escapeHtml(x.detail)}</td></tr>`).join('')}</tbody></table></div>`)}
+          ${sec('values', `<div class="card"><table><thead><tr><th>Data point</th><th>Value</th><th>MRC section</th><th>Source line in the contract</th><th>ACORD term</th></tr></thead>
+              <tbody>${d.values.map(x => `<tr><td style="font-weight:600">${escapeHtml(x.label)}</td><td>${escapeHtml(x.value || '—')}</td><td style="font-size:12px">${escapeHtml(x.section)}</td>
+              <td style="font-size:12px;color:var(--slate2)">${x.source_quote ? '“' + escapeHtml(x.source_quote) + '”' : '<span style="color:var(--mut)">not found in the contract</span>'}</td>
+              <td><code style="font-size:11px">${escapeHtml(x.acord_binding || '')}</code></td></tr>`).join('')}</tbody></table></div>`)}
+          ${sec('cdr', `<div class="card"><div class="banner">Indicative crosswalk to the Lloyd's Core Data Record — field names paraphrased, not the published specification.</div>
+              <table><thead><tr><th>Core Data Record field</th><th>Value</th><th>From</th></tr></thead><tbody>${cdr.map(x => `<tr>
+              <td style="font-weight:600">${escapeHtml(x.cdr_field)}</td><td>${x.status === 'identified' ? escapeHtml(x.value || '') : '<span class="chip quarantined">missing</span>'}</td>
+              <td style="font-size:12px">${escapeHtml(x.section)} · <code style="font-size:11px">${escapeHtml(x.acord_binding || '')}</code></td></tr>`).join('')}</tbody></table></div>`)}
+          ${sec('doc', `<div class="card"><div style="margin-bottom:8px"><a href="${escapeAttr(d.pdf)}" target="_blank" rel="noopener">Open in new tab ↗</a></div>
+              <iframe data-src="${escapeAttr(d.pdf)}" title="Contract PDF" style="width:100%;height:760px;border:1px solid var(--line);border-radius:8px;background:#fff"></iframe></div>`)}
+          ${sec('history', `<div class="card"><table><thead><tr><th>When</th><th>Event</th><th>By</th><th>Detail</th></tr></thead><tbody>${d.history.map(e => `<tr>
+              <td style="white-space:nowrap">${escapeHtml(new Date(e.created_at).toLocaleString())}</td><td><span class="chip plain">${escapeHtml(e.event_type)}</span></td>
+              <td>${escapeHtml(e.actor || '')}</td><td style="font-size:12px;color:var(--mut)">${escapeHtml(e.detail || '')}</td></tr>`).join('')}</tbody></table></div>`)}
+          <script>
+            function showTab(id){
+              document.querySelectorAll('[data-csec]').forEach(function(el){ el.style.display = el.getAttribute('data-csec') === id ? '' : 'none'; });
+              document.querySelectorAll('[data-ctab]').forEach(function(b){ b.className = b.getAttribute('data-ctab') === id ? 'act' : 'ghost'; });
+              if (id === 'doc') { var f = document.querySelector('iframe[data-src]'); if (f && !f.src) { f.src = f.getAttribute('data-src'); } }
+            }
+            document.querySelectorAll('[data-ctab]').forEach(function(b){ b.addEventListener('click', function(){ showTab(b.getAttribute('data-ctab')); }); });
+            showTab('overview');
+          <\/script>`;
+      },
+
+      'mrc_analytics': async function() {
+        const examples = ['Show me all contracts placed by Willis Towers Watson on marine',
+                          'Which syndicates lead the most premium?',
+                          'Which contracts fail a certainty check, and why?',
+                          'What are the exclusions on the cyber contract?'];
+        const ask = `<details class="details-summary" open><summary>What am I seeing?</summary>
+            <div class="body">The analytics agent answers questions about the whole book in two ways at once: Genie writes a query over the extracted, governed data (the query is shown), and a Knowledge Assistant answers from the contract wording itself. Below are book-level metrics, kept per currency.</div></details>
+          <div class="card" style="border-left:4px solid #7c3aed">
+            <div style="font-weight:700;margin-bottom:8px">🤖 Analytics agent — ask the book</div>
+            <div style="display:flex;gap:10px"><input type="text" id="mrcAskInput" aria-label="Ask a question about the contracts" placeholder="Ask anything about the contracts…" style="flex:1;padding:9px;border:1px solid var(--line2);border-radius:8px">
+              <button class="act" id="mrcAskBtn">Ask</button></div>
+            <div style="margin-top:8px">${examples.map(e => `<button class="chipq" data-ex="${escapeAttr(e)}" style="margin:3px">${escapeHtml(e)}</button>`).join('')}</div>
+            <div id="mrcAskResult" style="margin-top:12px"></div></div>
+          <script>
+            var inp = document.getElementById('mrcAskInput');
+            document.querySelectorAll('[data-ex]').forEach(function(b){ b.addEventListener('click', function(){ inp.value = b.getAttribute('data-ex'); document.getElementById('mrcAskBtn').click(); }); });
+            inp.addEventListener('focus', function(){ this.select(); });
+            inp.addEventListener('keydown', function(ev){ if (ev.key === 'Enter') { document.getElementById('mrcAskBtn').click(); } });
+            document.getElementById('mrcAskBtn').addEventListener('click', async function(){
+              var q = inp.value.trim(); if (!q) { return; }
+              var box = document.getElementById('mrcAskResult');
+              box.innerHTML = '<span class="spin"></span> Asking both — the structured answer usually arrives first…';
+              var res;
+              try { res = await fetchJSON('/api/mrc/ask', {method:'POST', body:{question:q}}); }
+              catch(e) { box.innerHTML = '<div class="error-banner">' + escapeHtml(e.message) + '</div>'; return; }
+              var h = '';
+              if (res.genie) {
+                h += '<div class="card"><div style="font-weight:700;margin-bottom:6px">From the extracted data (Genie)</div>';
+                if (res.genie.answer) { h += md(res.genie.answer); }
+                if (res.genie.sql) { h += '<details><summary style="cursor:pointer;font-size:12px">Show the query</summary><pre style="background:#f8fafc;padding:10px;border-radius:8px;overflow-x:auto;font:12px ui-monospace,Menlo,monospace">' + escapeHtml(res.genie.sql) + '</pre></details>'; }
+                if (res.genie.error) { h += '<p style="color:var(--mut)">' + escapeHtml(res.genie.error) + '</p>'; }
+                h += '</div>';
+              }
+              if (res.ka) { h += '<div class="card"><div style="font-weight:700;margin-bottom:6px">From the contract wording (Knowledge Assistant)</div>' + md(res.ka.answer || res.ka.error || '') + '</div>'; }
+              box.innerHTML = h;
+            });
+          <\/script>`;
+        const more = `<div class="card" style="display:flex;gap:18px;flex-wrap:wrap;align-items:center"><b>Across the book:</b>
+            <a href="#mrc_cdr">Core Data Record completeness →</a><a href="#mrc_certainty">Contract certainty, every contract →</a><a href="#mrc_lineage">Lineage explorer →</a></div>`;
+        return ask + more + await views.mrc_metrics();
+      },
+
+      'mrc_governance': async function() {
+        const g = await fetchJSON('/api/mrc/governance');
+        const when = t => escapeHtml(String(t || '').slice(0, 16).replace('T', ' '));
+        const q = g.questions.map((x, i) => `<details class="card" ${i < 2 ? 'open' : ''} style="padding:14px 18px">
+            <summary style="cursor:pointer;font-weight:700">${escapeHtml(x.q)}</summary>
+            <p style="margin:8px 0">${escapeHtml(x.a)}</p>
+            ${x.evidence.length ? `<ul style="margin:4px 0 0 18px;font-size:12px;color:var(--slate2)">${x.evidence.map(e => `<li>${escapeHtml(e)}</li>`).join('')}</ul>` : ''}</details>`).join('');
+        return `<details class="details-summary" open><summary>What am I seeing?</summary>
+            <div class="body">The questions a market body, an auditor or a regulator asks about this process — each answered from the recorded data, not from a slide. Below them: every schema approval, every human decision and every agent review, with who and when.</div></details>
+          <h2>Questions you may be asked</h2>${q}
+          <div class="card"><h2 style="margin-top:0">Schema approvals</h2><table><thead><tr><th>Schema</th><th>Version</th><th>Recorded by</th><th>When</th><th>Note</th></tr></thead>
+            <tbody>${g.versions.map(v => `<tr><td style="font-weight:600">${escapeHtml(v.schema_name)}</td><td><span class="chip plain">${escapeHtml(v.version)}</span></td>
+              <td>${escapeHtml(v.created_by)}</td><td style="white-space:nowrap">${when(v.created_at)}</td><td style="font-size:12px;color:var(--slate2)">${escapeHtml(v.change_note || v.description || '')}</td></tr>`).join('')}</tbody></table></div>
+          <div class="card"><h2 style="margin-top:0">Human decisions</h2>${g.decisions.length ? `<table><thead><tr><th>When</th><th>Decision</th><th>By</th><th>Document</th><th>Reason</th></tr></thead>
+            <tbody>${g.decisions.map(d => `<tr><td style="white-space:nowrap">${when(d.created_at)}</td><td><span class="chip plain">${escapeHtml(d.decision_type)}</span></td>
+              <td>${escapeHtml(d.actor)}</td><td style="font-size:12px">${escapeHtml(d.file_name || '')}</td><td style="font-size:12px;color:var(--mut)">${escapeHtml(d.reason || '')}</td></tr>`).join('')}</tbody></table>` : '<div style="color:var(--mut)">None yet.</div>'}</div>
+          <div class="card"><h2 style="margin-top:0">Agent reviews (advice only)</h2>${g.agents.length ? `<table><thead><tr><th>When</th><th>Agent</th><th>Subject</th><th>Asked by</th><th>Excerpt</th></tr></thead>
+            <tbody>${g.agents.map(a => `<tr><td style="white-space:nowrap">${when(a.created_at)}</td><td>${escapeHtml(a.agent)}</td><td style="font-size:12px">${escapeHtml(a.subject)}</td>
+              <td>${escapeHtml(a.requested_by)}</td><td style="font-size:12px;color:var(--mut)">${escapeHtml((a.excerpt || '').replace(/[*#]+/g, '').slice(0, 220))}…</td></tr>`).join('')}</tbody></table>` : '<div style="color:var(--mut)">No agent reviews yet.</div>'}</div>
+          <div class="card">Full event-by-event trail: <a href="#mrc_audit">Audit trail →</a></div>`;
       },
 
       'mrc_certainty': async function() {

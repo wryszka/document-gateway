@@ -17,6 +17,9 @@ from lib import sql  # noqa: E402
 from jobs.ingest_pipeline import audit  # noqa: E402
 
 RULES = ("Use ONLY the facts provided — never invent documents, numbers or names. You advise; a person decides. "
+         "Quote counts exactly as given in 'summary' — do not recount. Never add up amounts in different currencies "
+         "and never convert currencies; state premium per currency only if 'premium_by_currency' gives it. "
+         "Name every document you refer to (use its UMR or file name) — never write 'and one other'. "
          "Write for a Lloyd's market technical audience: precise, plain English, no hype. "
          "Format: a one-paragraph overview, then '### Needs attention' as bullet points (each naming the document "
          "and why), then '### Suggested next steps' as bullet points. Keep it under 250 words.")
@@ -50,7 +53,20 @@ def intake_facts(cfg):
     gaps = sql(f"""SELECT e.umr, x.label FROM {F}.v_mrc_extraction_latest x JOIN {F}.v_mrc_entities_latest e
                    ON x.mrc_id = e.mrc_id WHERE x.status <> 'identified' ORDER BY e.umr""", cfg=cfg)
     auto = sql(f"""SELECT count(*) FROM {F}.audit_event WHERE event_type='auto_ingested'""", cfg=cfg)[0][0]
+    states = [s for _, s, *_ in docs]
+    by_ccy = {}
+    for r in entities:
+        if r[5] is not None:
+            by_ccy[r[4]] = round(by_ccy.get(r[4], 0) + float(r[5]), 2)
+    failing = sorted({a for a, *_ in fails})
     return {
+        "summary": {"documents_received": len(docs),
+                    "contracts_loaded": len(entities),
+                    "loaded_automatically_no_person": int(auto),
+                    "loaded_after_a_person_confirmed_or_accepted_a_schema": max(len(entities) - int(auto), 0),
+                    "documents_still_waiting_for_a_person": sum(1 for s in states if s not in ("recognised", "rejected", "returned")),
+                    "contracts_failing_a_certainty_check": len(failing),
+                    "premium_by_currency": by_ccy},
         "documents": [{"file": f, "state": s, "schema": v or flagged, "broker": c} for f, s, v, c, flagged in docs],
         "contracts_landed": [{"umr": r[0], "insured_or_coverholder": r[1], "class": r[2], "broker": r[3],
                               "premium": f"{r[4]} {r[5]}", "signed_lines_pct": r[6], "schema": f"{r[7]} {r[8]}",

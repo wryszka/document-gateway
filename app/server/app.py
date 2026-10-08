@@ -25,6 +25,7 @@ from jobs import ingest_pipeline as pipe  # noqa: E402
 from jobs import trust_loop as tl  # noqa: E402
 from jobs import mrc_pipeline as mrc  # noqa: E402
 from jobs import mrc_schemas as ms  # noqa: E402
+from jobs import mrc_agents as ma  # noqa: E402
 from agents import extraction_review as review  # noqa: E402
 
 # In-app: use the app SP (default auth), not a CLI profile.
@@ -417,6 +418,138 @@ def mrc_list():
          "n_clauses", "n_exclusions", "n_insurers", "source_document_id",
          "slip_leader", "signed_lines_total", "choice_of_law", "checks_failed", "certainty_status",
          "schema_name", "schema_version"])}
+
+
+@app.get("/api/mrc/contracts")
+def mrc_contracts():
+    """Ingested contracts for the searchable list (incl. the syndicates on each)."""
+    rows = rows_as_dicts(
+        f"""SELECT e.mrc_id, e.umr, e.insured_name, e.class_of_business, e.broker_name, e.slip_leader,
+                   e.premium_currency, e.premium_amount, e.signed_lines_total, e.checks_failed, e.certainty_status,
+                   e.schema_name, e.schema_version, e.inception_date, e.expiry_date,
+                   (SELECT first(x.source_quote) FROM {F}.v_mrc_extraction_latest x
+                     WHERE x.mrc_id = e.mrc_id AND x.data_point = 'insurers') AS syndicates
+            FROM {F}.v_mrc_entities_latest e ORDER BY e.umr""",
+        ["mrc_id", "umr", "insured_name", "class_of_business", "broker_name", "slip_leader", "premium_currency",
+         "premium_amount", "signed_lines_total", "checks_failed", "certainty_status", "schema_name", "schema_version",
+         "inception_date", "expiry_date", "syndicates"])
+    return {"contracts": rows}
+
+
+@app.get("/api/mrc/contract")
+def mrc_contract(mrc_id: str):
+    """Everything about one ingested contract: headline facts, certainty checks, every
+    value with its source line and CDR field, the source document, and its history."""
+    head = rows_as_dicts(
+        f"""SELECT e.mrc_id, e.umr, e.policy_number, e.class_of_business, e.inception_date, e.expiry_date, e.insured_name, e.broker_name, e.premium_text, e.headline_limit, e.deductible_text, e.premium_amount, e.premium_currency, e.limit_amount, e.n_clauses, e.n_exclusions, e.n_insurers, e.choice_of_law, e.situation, e.slip_leader, e.signed_lines_total, e.brokerage_pct, e.checks_failed, e.certainty_status, e.schema_name, e.schema_version, e.source_document_id, d.file_name, d.doc_id, d.ingested_at, d.signed_off_by, d.signed_off_at
+            FROM {F}.v_mrc_entities_latest e JOIN {F}.source_document d ON e.source_document_id = d.doc_id
+            WHERE e.mrc_id = :m""",
+        ["mrc_id", "umr", "policy_number", "class_of_business", "inception_date", "expiry_date", "insured_name",
+         "broker_name", "premium_text", "headline_limit", "deductible_text", "premium_amount", "premium_currency",
+         "limit_amount", "n_clauses", "n_exclusions", "n_insurers", "choice_of_law", "situation", "slip_leader",
+         "signed_lines_total", "brokerage_pct", "checks_failed", "certainty_status", "schema_name", "schema_version",
+         "source_document_id", "file_name", "doc_id", "ingested_at", "signed_off_by", "signed_off_at"], {"m": mrc_id})
+    if not head:
+        raise HTTPException(404, "no such contract")
+    h = head[0]
+    checks = rows_as_dicts(
+        f"SELECT check_id, label, status, detail FROM {F}.v_mrc_certainty_latest WHERE mrc_id=:m ORDER BY status, label",
+        ["check_id", "label", "status", "detail"], {"m": mrc_id})
+    values = rows_as_dicts(
+        f"""SELECT label, acord_binding, cdr_field, section, value, source_quote, status
+            FROM {F}.v_mrc_extraction_latest WHERE mrc_id=:m ORDER BY section, label""",
+        ["label", "acord_binding", "cdr_field", "section", "value", "source_quote", "status"], {"m": mrc_id})
+    history = rows_as_dicts(
+        f"""SELECT created_at, event_type, actor, detail FROM {F}.audit_event
+            WHERE entity_id IN (:d, :m) ORDER BY created_at""",
+        ["created_at", "event_type", "actor", "detail"], {"d": h["doc_id"], "m": mrc_id})
+    return {"contract": h, "checks": checks, "values": values, "history": history,
+            "pdf": f"/api/mrc/pdf/{h['doc_id']}"}
+
+
+@app.post("/api/mrc/agent/intake_review")
+def mrc_agent_intake(body: dict = Body(default={})):
+    """Intake review agent: reads the computed intake facts and advises. Logged; never acts."""
+    try:
+        return ma.intake_review(CFG, actor=body.get("actor", "presenter"))
+    except Exception as e:
+        raise HTTPException(500, f"Agent unavailable: {e}")
+
+
+@app.post("/api/mrc/agent/schema_review")
+def mrc_agent_schema(body: dict = Body(...)):
+    """Schema review agent: critiques a proposed schema or amendment before a person records it."""
+    kind = body.get("kind")
+    if kind not in ("recognition", "changes"):
+        raise HTTPException(400, "kind must be recognition or changes")
+    try:
+        return ma.schema_review(CFG, kind, body.get("payload") or {}, actor=body.get("actor", "presenter"))
+    except Exception as e:
+        raise HTTPException(500, f"Agent unavailable: {e}")
+
+
+@app.get("/api/mrc/governance")
+def mrc_governance():
+    """The questions a market regulator or auditor asks, answered from the data."""
+    versions = rows_as_dicts(
+        f"""SELECT t.counterparty AS schema_name, t.template_version AS version, t.created_by, t.created_at,
+                   t.field_count, n.description, n.change_note
+            FROM {F}.template t LEFT JOIN {F}.mrc_schema_note n
+              ON n.schema_name = t.counterparty AND n.schema_version = t.template_version
+            WHERE t.doc_family = 'mrc' ORDER BY t.created_at""",
+        ["schema_name", "version", "created_by", "created_at", "field_count", "description", "change_note"])
+    decisions = rows_as_dicts(
+        f"""SELECT dc.created_at, dc.decision_type, dc.actor, dc.reason, dc.template_version, d.file_name
+            FROM {F}.decision dc LEFT JOIN {F}.source_document d ON dc.source_document_id = d.doc_id
+            WHERE dc.tenant = 'mrc' ORDER BY dc.created_at""",
+        ["created_at", "decision_type", "actor", "reason", "version", "file_name"])
+    agents = rows_as_dicts(
+        f"""SELECT created_at, agent, subject, requested_by, model, substr(output, 1, 400) AS excerpt
+            FROM {F}.mrc_agent_note ORDER BY created_at DESC""",
+        ["created_at", "agent", "subject", "requested_by", "model", "excerpt"])
+    auto = rows_as_dicts(
+        f"""SELECT d.file_name, a.created_at, a.detail FROM {F}.audit_event a
+            JOIN {F}.source_document d ON a.entity_id = d.doc_id
+            WHERE a.event_type = 'auto_ingested' ORDER BY d.file_name""", ["file_name", "created_at", "detail"])
+    fails = rows_as_dicts(
+        f"""SELECT e.umr, e.insured_name, c.label, c.detail FROM {F}.v_mrc_certainty_latest c
+            JOIN {F}.v_mrc_entities_latest e ON c.mrc_id = e.mrc_id WHERE c.status = 'fail' ORDER BY e.umr""",
+        ["umr", "insured_name", "label", "detail"])
+    grants = []
+    try:
+        grants = [{"principal": r[0], "privilege": r[1]} for r in q(f"SHOW GRANTS ON SCHEMA {F}")]
+    except Exception:
+        pass
+    who = lambda v: f"{v['schema_name']} {v['version']} — recorded by {v['created_by']} on {str(v['created_at'])[:16].replace('T', ' ')}"
+    questions = [
+        {"q": "Who approved each schema, and when?",
+         "a": f"{len(versions)} schema versions are on record, each recorded by a named person with a timestamp and a note.",
+         "evidence": [who(v) + (f" — “{v['change_note']}”" if v.get("change_note") else "") for v in versions]},
+        {"q": "Which contracts were loaded with no person involved?",
+         "a": f"{len(auto)} contracts matched a recorded schema with every expected field and were loaded automatically.",
+         "evidence": [f"{a['file_name']} — {a['detail']}" for a in auto]},
+        {"q": "What did people decide, and why?",
+         "a": f"{len(decisions)} human decisions are recorded (schema confirmations, accepted changes, returns, corrections), each with who, when and the reason.",
+         "evidence": [f"{str(d['created_at'])[:16].replace('T', ' ')} · {d['decision_type']} · {d['actor']} · {d['file_name'] or ''} — {d['reason'] or ''}" for d in decisions]},
+        {"q": "What did the AI do — and did it decide anything?",
+         "a": "No. The model only proposed ACORD mappings for an unfamiliar schema and builds the wider entity graph; a person "
+              "confirmed every schema. The review agents advise — they cannot record a schema or load a contract. "
+              f"{len(agents)} agent reviews are logged with the facts they were given.",
+         "evidence": [f"{str(a['created_at'])[:16].replace('T', ' ')} · {a['agent']} · {a['subject']} · asked by {a['requested_by']}" for a in agents]},
+        {"q": "Which contracts fail a market rule?",
+         "a": f"{len(fails)} certainty check failure(s) across the book.",
+         "evidence": [f"{f['umr']} {f['insured_name']} — {f['label']}: {f['detail']}" for f in fails]},
+        {"q": "Where did a number come from?",
+         "a": "Every value is stored with the MRC section and the exact source line it was read from, and the original PDF is "
+              "kept in a governed volume. Open any contract → Values & lineage.", "evidence": []},
+        {"q": "Can a schema be changed without anyone knowing?",
+         "a": "No. Schema versions are append-only: a change records a new version with who, when and why; earlier versions stay readable.",
+         "evidence": [who(v) for v in versions if v["version"] != "v1"]},
+        {"q": "Who can see and change this data?",
+         "a": "Access is governed in Unity Catalog. Current grants on the schema:",
+         "evidence": [f"{g['principal']} — {g['privilege']}" for g in grants[:20]]},
+    ]
+    return {"questions": questions, "versions": versions, "decisions": decisions, "agents": agents}
 
 
 # Editable metric columns — an allowlist; the field name is validated against this
