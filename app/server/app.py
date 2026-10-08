@@ -569,8 +569,9 @@ def mrc_confirm(body: dict = Body(...)):
         raise HTTPException(400, "This document is not waiting for schema recognition")
     if not any(f.get("include") and f.get("binding") for f in fields):
         raise HTTPException(400, "Select at least one field")
-    actor = body.get("actor", "reviewer")
-    return _start_job("recognise", lambda: ms.confirm_new_schema(CFG, doc_id, name, fields, actor=actor))
+    actor, description = body.get("actor", "reviewer"), body.get("description")
+    return _start_job("recognise", lambda: ms.confirm_new_schema(CFG, doc_id, name, fields, actor=actor,
+                                                                   description=description))
 
 
 @app.get("/api/mrc/changes")
@@ -589,8 +590,14 @@ def mrc_accept_changes(body: dict = Body(...)):
     st = q(f"SELECT inbound_state FROM {F}.source_document WHERE tenant='mrc' AND doc_id=:d", {"d": doc_id})
     if not st or st[0][0] != "schema_changed":
         raise HTTPException(400, "This document is not flagged as a changed layout")
-    actor = body.get("actor", "reviewer")
-    return _start_job("accept", lambda: ms.accept_changes(CFG, doc_id, actor=actor))
+    actor, decisions, note = body.get("actor", "reviewer"), body.get("decisions") or {}, body.get("change_note")
+    for k, dsc in decisions.items():  # validate the person's choices before starting
+        if dsc.get("action") not in ("rename", "map", "gap"):
+            raise HTTPException(400, f"unknown decision for {k}")
+        if dsc.get("action") == "map" and not (dsc.get("label") or "").strip():
+            raise HTTPException(400, f"choose a document field to map {k} to")
+    return _start_job("accept", lambda: ms.accept_changes(CFG, doc_id, actor=actor, decisions=decisions,
+                                                            change_note=note))
 
 
 @app.get("/api/mrc/progress")
@@ -693,12 +700,16 @@ def mrc_schemas():
         ["name", "version", "field_count", "field_map", "fingerprint", "created_by", "created_at"])
     used = {r[0]: int(r[1]) for r in q(
         f"SELECT schema_name, count(*) FROM {F}.v_mrc_entities_latest GROUP BY schema_name")}
+    notes = {(n[0], n[1]): {"description": n[2], "change_note": n[3]} for n in q(
+        f"SELECT schema_name, schema_version, description, change_note FROM {F}.mrc_schema_note")}
     out = {}
     for r in rows:
+        r.update(notes.get((r["name"], r["version"]), {"description": None, "change_note": None}))
         fm = json.loads(r["field_map"] or "{}")
         r["points"] = [{"key": k, "label": v.get("display") or v.get("label"), "source_label": v.get("label"),
                         "learned_labels": v.get("labels", []), "acord": f"{v.get('entity')}.{v.get('attribute')}",
-                        "cdr": v.get("cdr"), "section": v.get("section"), "core": v.get("core")} for k, v in fm.items()]
+                        "cdr": v.get("cdr"), "section": v.get("section"), "core": v.get("core"),
+                        "note": v.get("description")} for k, v in fm.items()]
         r["fingerprint"] = json.loads(r["fingerprint"] or "{}")
         r.pop("field_map")
         out.setdefault(r["name"], {"name": r["name"], "versions": [], "contracts": used.get(r["name"], 0)})["versions"].append(r)

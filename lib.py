@@ -24,6 +24,8 @@ STATE_PATH = ROOT / "state.json"
 def load_config() -> dict[str, Any]:
     """Load config.json and add computed convenience fields."""
     cfg = json.loads(CONFIG_PATH.read_text())
+    if os.environ.get("DG_SCHEMA"):  # point a local run at an isolated test copy of the schema
+        cfg["schema"] = os.environ["DG_SCHEMA"]
     cfg["full_schema"] = f'{cfg["catalog"]}.{cfg["schema"]}'
     cfg["volume_path"] = f'/Volumes/{cfg["catalog"]}/{cfg["schema"]}/{cfg["volume"]}'
     return cfg

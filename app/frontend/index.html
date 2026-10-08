@@ -79,9 +79,9 @@
       mrc: {label:'Market Reform Contract', short:'MRC', icon:'📜', sub:'Lloyd\'s MRC v3 · open market',
         views:[
           {id:'mrc_inbox', label:'Inbox', icon:'📥'},
-          {id:'mrc_recognition', label:'Schema Recognition', icon:'🧬'},
-          {id:'mrc_changes', label:'Schema Changes', icon:'🔀'},
-          {id:'mrc_schemas', label:'Schema Repository', icon:'🗄️'},
+          {id:'mrc_schemas', label:'Schemas', icon:'🗄️'},
+          {id:'mrc_recognition', label:'Schema Recognition', hidden:true, parent:'mrc_schemas'},
+          {id:'mrc_changes', label:'Schema Changes', hidden:true, parent:'mrc_schemas'},
           {id:'mrc_certainty', label:'Contract Certainty', icon:'✅'},
           {id:'mrc_cdr', label:'Core Data Record', icon:'🧾'},
           {id:'mrc_lineage', label:'Lineage', icon:'🔗'},
@@ -112,6 +112,15 @@
     };
     const FLOW_ORDER = ['mrc','bordereaux','health_slip'];
     function flowForView(id){ for(const f of FLOW_ORDER){ if(FLOWS[f].views.some(v=>v.id===id)) return f; } return null; }
+
+    // Tabs shared by the three schema screens. Counts show what is waiting.
+    async function schemaTabs(active) {
+      let st = {};
+      try { st = ((await (await fetch('/api/mrc/progress')).json()).states) || {}; } catch (e) {}
+      const tab = (id, label, n) => `<a href="#${id}" style="display:inline-block;padding:9px 16px;margin-right:4px;border-radius:9px 9px 0 0;text-decoration:none;font-weight:600;
+          ${active === id ? 'background:var(--card);color:var(--ink);border:1px solid var(--line);border-bottom-color:var(--card)' : 'color:var(--mut)'}">${label}${n ? ` <span class="chip differs" style="margin-left:4px">${n}</span>` : ''}</a>`;
+      return `<div style="border-bottom:1px solid var(--line);margin-bottom:16px">${tab('mrc_schemas', 'Repository', 0)}${tab('mrc_recognition', 'Recognition', st.new_schema || 0)}${tab('mrc_changes', 'Changes', st.schema_changed || 0)}</div>`;
+    }
 
     // Fetch helper with loading state
     async function fetchJSON(path, opts = {}) {
@@ -258,7 +267,7 @@
           <details class="details-summary" open><summary>What am I seeing?</summary>
             <div class="body">Every document that has arrived. Each one is matched against the schema repository by its fingerprint — the document title and its section headings. A match with every expected field lands automatically; a match with changed or missing fields is flagged for review; an MRC with no matching schema goes to schema recognition; anything that is not an MRC is held for a person.</div>
           </details>
-          ${busy ? `<div class="banner"><span class="spin"></span> ${escapeHtml(jobMsg)}</div>` : ''}
+          ${busy ? `<div class="banner" id="mrcJobBanner"><span class="spin"></span> <span id="mrcJobText">${escapeHtml(jobMsg)}</span></div>` : ''}
           ${job.error && !busy ? `<div class="error-banner">The last step failed: ${escapeHtml(job.error)}</div>` : ''}
           ${!busy && received ? `<div class="card" style="display:flex;justify-content:space-between;align-items:center;gap:16px;border-left:4px solid var(--brand)">
               <div><div style="font-weight:700">${received} document${received > 1 ? 's' : ''} received, not yet read</div>
@@ -322,7 +331,20 @@
               catch(e){ toast('Could not reset: '+e.message); }
             });
             if (${busy ? 'true' : 'false'}) {
-              setTimeout(function(){ if((window.location.hash||'').indexOf('#mrc_inbox')===0){ render(true); } }, 2500);
+              // Keep this page still: only the banner text updates; redraw once when the step ends.
+              window.__mrcPoll = setInterval(async function(){
+                if ((window.location.hash||'').indexOf('#mrc_inbox') !== 0) { clearInterval(window.__mrcPoll); window.__mrcPoll = null; return; }
+                var d; try { d = await (await fetch('/api/mrc/progress')).json(); } catch(e) { return; }
+                var st = d.states || {}, total = 0; for (var k in st) { total += st[k]; }
+                var waiting = (st.received || 0) + (st.processing || 0);
+                var el = document.getElementById('mrcJobText');
+                if (el && d.kind === 'intake') {
+                  el.textContent = 'Reading and matching against the schema repository — ' + (total - waiting) + ' of ' + total + ' done · '
+                    + (st.recognised || 0) + ' known · ' + (st.schema_changed || 0) + ' changed · ' + (st.new_schema || 0) + ' new · '
+                    + (st.unrecognised || 0) + ' not an MRC';
+                }
+                if (!d.running && !(st.processing > 0)) { clearInterval(window.__mrcPoll); window.__mrcPoll = null; render(true); }
+              }, 3000);
             }
           <\/script>`;
       },
@@ -330,11 +352,12 @@
       'mrc_recognition': async function() {
         const qs = new URLSearchParams((window.location.hash.split('?')[1]) || '');
         const doc = qs.get('doc');
+        const tabs = await schemaTabs('mrc_recognition');
         const explain = `<details class="details-summary" open><summary>What am I seeing?</summary>
             <div class="body">Schema recognition for a document no registered schema matches. Fields the shared vocabulary already knows are reused as they are; unfamiliar fields are mapped to an ACORD term by the model, with its stated confidence. Check or change each mapping, then record the schema — every future document with this fingerprint is read with it automatically.</div></details>`;
         if (!doc) {
           const w = (await fetchJSON('/api/mrc/propose')).waiting || [];
-          return explain + `<div class="card"><h2 style="margin-top:0">Documents waiting for recognition</h2>` +
+          return tabs + explain + `<div class="card"><h2 style="margin-top:0">Documents waiting for recognition</h2>` +
             (w.length ? `<table><tbody>${w.map(x => `<tr><td style="font-weight:600">${escapeHtml(x.file_name)}</td>
               <td style="text-align:right"><a class="act" style="text-decoration:none;padding:6px 11px;border-radius:8px" href="#mrc_recognition?doc=${encodeURIComponent(x.doc_id)}">Recognise →</a></td></tr>`).join('')}</tbody></table>`
              : `<div style="color:var(--mut)">Nothing needs recognition. A document whose fingerprint matches no registered schema appears here after <a href="#mrc_inbox">Run intake</a>.</div>`) + `</div>`;
@@ -351,9 +374,10 @@
               <option value="">— no ACORD term —</option>${p.bindings.map(b => opt(b, f.binding)).join('')}</select></td>
           <td style="font-size:12px">${f.cdr ? escapeHtml(f.cdr) : '<span style="color:var(--mut)">—</span>'}</td>
           <td style="font-size:12px">${f.origin === 'known field' ? '<span class="chip active">known field</span>'
-              : `<span class="chip differs">model</span> ${f.confidence != null ? Math.round(f.confidence * 100) + '%' : ''}${f.why ? `<div style="color:var(--mut);margin-top:3px">${escapeHtml(f.why)}</div>` : ''}`}</td></tr>`).join('');
+              : `<span class="chip differs">model</span> ${f.confidence != null ? Math.round(f.confidence * 100) + '%' : ''}${f.why ? `<div style="color:var(--mut);margin-top:3px">${escapeHtml(f.why)}</div>` : ''}`}</td>
+          <td><input data-note="${i}" aria-label="Note for ${escapeAttr(f.label)}" placeholder="optional" style="width:130px;padding:5px;border:1px solid var(--line2);border-radius:6px"></td></tr>`).join('');
         const known = p.fields.filter(f => f.origin === 'known field').length;
-        return explain + `<div class="strip">
+        return tabs + explain + `<div class="strip">
             <div><div class="lbl">Document</div><div class="big brand" style="font-size:18px">${escapeHtml(p.file_name)}</div></div>
             <div><div class="lbl">Fingerprint</div><div class="big" style="font-size:15px">${escapeHtml(p.fingerprint.title)}</div></div>
             <div><div class="lbl">Fields reused · proposed</div><div class="big">${known} · ${p.fields.length - known}</div></div>
@@ -364,7 +388,11 @@
               <input id="mrcSchemaName" value="${escapeAttr(p.suggested_name)}" style="flex:1;padding:8px;border:1px solid var(--line2);border-radius:8px">
               <a class="ghost" style="text-decoration:none;padding:7px 12px;border-radius:8px" href="/api/mrc/pdf/${encodeURIComponent(p.doc_id)}" target="_blank" rel="noopener">View PDF ↗</a>
             </div>
-            <table><thead><tr><th></th><th>Field</th><th>Section</th><th style="min-width:220px">Value · source line</th><th>ACORD term</th><th>CDR field*</th><th>Mapping</th></tr></thead>
+            <div style="margin-bottom:14px">
+              <label for="mrcSchemaDesc" style="font-weight:600;display:block;margin-bottom:4px">Description — what this document is</label>
+              <textarea id="mrcSchemaDesc" rows="2" placeholder="e.g. A binding authority agreement: lets a coverholder bind business on the syndicates' behalf within agreed classes, territory and limits; reported monthly by bordereaux." style="width:100%;padding:8px;border:1px solid var(--line2);border-radius:8px;font:inherit"></textarea>
+            </div>
+            <table><thead><tr><th></th><th>Field</th><th>Section</th><th style="min-width:200px">Value · source line</th><th>ACORD term</th><th>CDR field*</th><th>Mapping</th><th>Note</th></tr></thead>
             <tbody>${rows}</tbody></table>
             <div style="font-size:11px;color:var(--mut);margin-top:8px">* Indicative Lloyd's Core Data Record field — a paraphrased crosswalk for discussion, not the published specification. Values are read by section and label; the model only proposes the mapping for unfamiliar fields.</div>
             <div style="margin-top:16px;display:flex;align-items:center;gap:12px">
@@ -379,11 +407,13 @@
                 var o = Object.assign({}, f);
                 o.include = document.querySelector('[data-inc="' + i + '"]').checked;
                 o.binding = document.querySelector('[data-bind="' + i + '"]').value || null;
+                o.note = document.querySelector('[data-note="' + i + '"]').value || '';
                 return o;
               });
               b.disabled = true; b.textContent = 'Recording…';
               try {
-                await fetchJSON('/api/mrc/confirm', {method:'POST', body:{doc_id:p.doc_id, name:document.getElementById('mrcSchemaName').value, fields:fields}});
+                await fetchJSON('/api/mrc/confirm', {method:'POST', body:{doc_id:p.doc_id, name:document.getElementById('mrcSchemaName').value,
+                  description:document.getElementById('mrcSchemaDesc').value, fields:fields}});
                 toast('Schema recorded — ingesting the document');
                 setTimeout(function(){ window.location.hash = '#mrc_inbox'; }, 700);
               } catch(e) { toast('Could not record: ' + e.message); b.disabled = false; b.textContent = 'Confirm & record schema'; }
@@ -394,51 +424,83 @@
       'mrc_changes': async function() {
         const qs = new URLSearchParams((window.location.hash.split('?')[1]) || '');
         const doc = qs.get('doc');
+        const tabs = await schemaTabs('mrc_changes');
         const explain = `<details class="details-summary" open><summary>What am I seeing?</summary>
             <div class="body">A document that matches a registered schema's fingerprint but not every field: something was renamed or left out. Renames are proposed by text similarity; missing fields stay missing and remain visible as gaps downstream. Accepting records the next version of the schema, which has learned the new labels.</div></details>`;
         if (!doc) {
           const inbox = await fetchJSON('/api/mrc/inbox');
           const w = (inbox.documents || []).filter(x => x.inbound_state === 'schema_changed');
-          return explain + `<div class="card"><h2 style="margin-top:0">Documents with layout changes</h2>` +
+          return tabs + explain + `<div class="card"><h2 style="margin-top:0">Documents with layout changes</h2>` +
             (w.length ? `<table><tbody>${w.map(x => `<tr><td style="font-weight:600">${escapeHtml(x.file_name)}</td>
               <td style="text-align:right"><a class="act" style="text-decoration:none;padding:6px 11px;border-radius:8px" href="#mrc_changes?doc=${encodeURIComponent(x.doc_id)}">Review changes →</a></td></tr>`).join('')}</tbody></table>`
              : `<div style="color:var(--mut)">No flagged layout changes. They appear here after <a href="#mrc_inbox">Run intake</a>.</div>`) + `</div>`;
         }
         const c = await fetchJSON('/api/mrc/changes?doc_id=' + encodeURIComponent(doc));
         const next = 'v' + (parseInt(String(c.version || 'v1').replace('v', ''), 10) + 1);
-        const rows = (c.diff || []).map(r => `<tr>
-          <td style="font-weight:600">${escapeHtml(r.data_point)}</td>
-          <td style="font-size:12px">${escapeHtml(r.section)}</td>
-          <td><span class="chip ${r.change === 'renamed' ? 'differs' : 'quarantined'}">${r.change === 'renamed' ? 'renamed' : 'missing'}</span></td>
+        const labels = c.doc_labels || [];
+        const rows = (c.diff || []).map(r => {
+          const renamed = r.change === 'renamed';
+          const opts = renamed
+            ? `<option value="rename" selected>Accept rename → “${escapeHtml(r.found_label)}”</option><option value="map">Map to another field…</option><option value="gap">Keep as a gap</option>`
+            : `<option value="gap" selected>Keep as a gap</option><option value="map">Map to a field in the document…</option>`;
+          return `<tr>
+          <td style="font-weight:600">${escapeHtml(r.data_point)}<div style="font-size:11px;color:var(--mut)">${escapeHtml(r.section)}</div></td>
+          <td><span class="chip ${renamed ? 'differs' : 'quarantined'}">${renamed ? 'renamed' : 'missing'}</span></td>
           <td>${escapeHtml(r.expected_label || '—')}</td>
-          <td>${r.found_label ? escapeHtml(r.found_label) + ` <span style="font-size:11px;color:var(--mut)">(${Math.round(r.similarity * 100)}% similar)</span>` : '<span style="color:var(--mut)">not in the document</span>'}</td>
-          <td style="font-size:12px">${r.source_quote ? '“' + escapeHtml(r.source_quote) + '”' : '—'}</td></tr>`).join('');
+          <td>${r.found_label ? escapeHtml(r.found_label) + ` <span style="font-size:11px;color:var(--mut)">(${Math.round(r.similarity * 100)}% similar)</span>` : '<span style="color:var(--mut)">not in the document</span>'}
+              ${r.source_quote ? `<div style="font-size:11px;color:var(--mut);margin-top:3px">“${escapeHtml(r.source_quote)}”</div>` : ''}</td>
+          <td><select data-dec="${escapeAttr(r.key)}" aria-label="Decision for ${escapeAttr(r.data_point)}" style="padding:5px;border:1px solid var(--line2);border-radius:6px;max-width:230px">${opts}</select>
+              <select data-map="${escapeAttr(r.key)}" aria-label="Document field for ${escapeAttr(r.data_point)}" disabled style="display:block;margin-top:5px;padding:5px;border:1px solid var(--line2);border-radius:6px;max-width:230px">
+                <option value="">— choose a field —</option>${labels.map(l => `<option value="${escapeAttr(l)}">${escapeHtml(l)}</option>`).join('')}</select></td>
+          <td><input data-dnote="${escapeAttr(r.key)}" aria-label="Note for ${escapeAttr(r.data_point)}" placeholder="optional" style="width:140px;padding:5px;border:1px solid var(--line2);border-radius:6px"></td></tr>`;
+        }).join('');
         const found = (c.points || []).filter(p => p.status === 'identified').length;
-        return explain + `<div class="strip">
+        window.__mrcChangesDoc = c.doc_id;
+        return tabs + explain + `<div class="strip">
             <div><div class="lbl">Document</div><div class="big brand" style="font-size:18px">${escapeHtml(c.file_name)}</div></div>
             <div><div class="lbl">Matched schema</div><div class="big" style="font-size:15px">${escapeHtml(c.schema || '—')} ${escapeHtml(c.version || '')}</div></div>
             <div><div class="lbl">Fields found as expected</div><div class="big">${found}/${(c.points || []).length}</div></div>
           </div>
-          <div class="card"><h2 style="margin-top:0">What changed</h2>
-            <table><thead><tr><th>Data point</th><th>Section</th><th>Change</th><th>Schema expects</th><th>Document has</th><th>Source line</th></tr></thead>
+          <div class="card"><h2 style="margin-top:0">What changed — decide each field</h2>
+            <table><thead><tr><th>Data point</th><th>Change</th><th>Schema expects</th><th>Document has</th><th>Decision</th><th>Note</th></tr></thead>
             <tbody>${rows}</tbody></table>
-            <div style="margin-top:16px;display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+            <div style="margin:14px 0 6px">
+              <label for="mrcChangeNote" style="font-weight:600;display:block;margin-bottom:4px">Change note — why this version is being recorded</label>
+              <textarea id="mrcChangeNote" rows="2" placeholder="e.g. Marsh's construction template renames two fields; governing law and settlement date to be chased with the broker." style="width:100%;padding:8px;border:1px solid var(--line2);border-radius:8px;font:inherit"></textarea>
+            </div>
+            <div style="margin-top:12px;display:flex;align-items:center;gap:10px;flex-wrap:wrap">
               <button class="act" id="mrcAcceptBtn">Accept &amp; record ${escapeHtml(next)}</button>
               <button class="ghost" id="mrcReturnBtn">Return to broker</button>
               <a class="ghost" style="text-decoration:none;padding:7px 12px;border-radius:8px" href="/api/mrc/pdf/${encodeURIComponent(c.doc_id)}" target="_blank" rel="noopener">View PDF ↗</a>
-              <span style="color:var(--mut);font-size:12px">Accepting learns the renamed labels; missing fields stay flagged.</span>
+              <span style="color:var(--mut);font-size:12px">Renames and mappings are learned by the new version; gaps stay flagged downstream.</span>
             </div></div>
           <script>
+            document.querySelectorAll('[data-dec]').forEach(function(sel){
+              sel.addEventListener('change', function(){
+                var m = document.querySelector('[data-map="' + sel.getAttribute('data-dec') + '"]');
+                m.disabled = sel.value !== 'map';
+              });
+            });
             document.getElementById('mrcAcceptBtn').addEventListener('click', async function(){
-              var b = this; b.disabled = true; b.textContent = 'Recording…';
-              try { await fetchJSON('/api/mrc/accept_changes', {method:'POST', body:{doc_id:'${escapeAttr(c.doc_id)}'}});
+              var b = this, decisions = {}, problem = null;
+              document.querySelectorAll('[data-dec]').forEach(function(sel){
+                var k = sel.getAttribute('data-dec');
+                var label = document.querySelector('[data-map="' + k + '"]').value;
+                if (sel.value === 'map' && !label) { problem = 'Choose a document field for every row set to Map.'; }
+                decisions[k] = {action: sel.value, label: sel.value === 'map' ? label : null,
+                                note: document.querySelector('[data-dnote="' + k + '"]').value || ''};
+              });
+              if (problem) { toast(problem); return; }
+              b.disabled = true; b.textContent = 'Recording…';
+              try { await fetchJSON('/api/mrc/accept_changes', {method:'POST', body:{doc_id: window.__mrcChangesDoc, decisions: decisions,
+                      change_note: document.getElementById('mrcChangeNote').value}});
                     toast('New schema version recorded — ingesting the document'); setTimeout(function(){ window.location.hash = '#mrc_inbox'; }, 700); }
-              catch(e) { toast('Could not accept: ' + e.message); b.disabled = false; }
+              catch(e) { toast('Could not accept: ' + e.message); b.disabled = false; b.textContent = 'Accept & record'; }
             });
             document.getElementById('mrcReturnBtn').addEventListener('click', async function(){
               var r = await confirm('Return this document to the broker to fix the layout?');
               if(!r.confirmed){ return; }
-              try { await fetchJSON('/api/mrc/review', {method:'POST', body:{doc_id:'${escapeAttr(c.doc_id)}', action:'return', reason:r.reason}});
+              try { await fetchJSON('/api/mrc/review', {method:'POST', body:{doc_id: window.__mrcChangesDoc, action:'return', reason:r.reason}});
                     toast('Returned to broker — decision recorded'); window.location.hash = '#mrc_inbox'; }
               catch(e) { toast('Error: ' + e.message); }
             });
@@ -447,24 +509,28 @@
 
       'mrc_schemas': async function() {
         const d = await fetchJSON('/api/mrc/schemas');
+        const tabs = await schemaTabs('mrc_schemas');
         const explain = `<details class="details-summary" open><summary>What am I seeing?</summary>
             <div class="body">The schema repository. Each schema is identified by a fingerprint (the document title and its section headings) and lists the data points it reads, each bound to an ACORD term. Versions are never edited: accepting a changed layout records a new version that has learned the new labels.</div></details>`;
-        if (!d.schemas.length) return explain + `<div class="card">No schemas recorded.</div>`;
-        return explain + d.schemas.map(sc => {
+        if (!d.schemas.length) return tabs + explain + `<div class="card">No schemas recorded.</div>`;
+        return tabs + explain + d.schemas.map(sc => {
           const latest = sc.versions[0];
           return `<div class="card">
             <div style="display:flex;justify-content:space-between;align-items:baseline;gap:12px">
               <h2 style="margin:0">${escapeHtml(sc.name)} <span class="chip active">${escapeHtml(latest.version)}</span></h2>
               <span style="color:var(--mut);font-size:12px">${sc.contracts} contract${sc.contracts === 1 ? '' : 's'} read with it</span></div>
+            ${(sc.versions.find(v => v.description) || {}).description ? `<p style="margin:8px 0 4px">${escapeHtml(sc.versions.find(v => v.description).description)}</p>` : ''}
             <div style="font-size:12px;color:var(--mut);margin:6px 0 10px">Fingerprint: <b>${escapeHtml(latest.fingerprint.title || '')}</b> · ${escapeHtml((latest.fingerprint.sections || []).join(' · '))}</div>
-            <table style="margin-bottom:12px"><thead><tr><th>Version</th><th>Recorded by</th><th>When</th><th class="num">Data points</th></tr></thead>
+            <table style="margin-bottom:12px"><thead><tr><th>Version</th><th>Recorded by</th><th>When</th><th class="num">Data points</th><th>Change note</th></tr></thead>
               <tbody>${sc.versions.map(v => `<tr><td><span class="chip ${v === latest ? 'active' : 'plain'}">${escapeHtml(v.version)}</span></td>
-                <td>${escapeHtml(v.created_by)}</td><td>${escapeHtml(new Date(v.created_at).toLocaleString())}</td><td class="num">${v.field_count}</td></tr>`).join('')}</tbody></table>
+                <td>${escapeHtml(v.created_by)}</td><td>${escapeHtml(new Date(v.created_at).toLocaleString())}</td><td class="num">${v.field_count}</td>
+                <td style="font-size:12px;color:var(--slate2)">${escapeHtml(v.change_note || '—')}</td></tr>`).join('')}</tbody></table>
             <details><summary style="cursor:pointer;font-weight:600">Data points in ${escapeHtml(latest.version)}</summary>
-              <table style="margin-top:8px"><thead><tr><th>Data point</th><th>Read from</th><th>ACORD term</th><th>CDR field*</th></tr></thead>
+              <table style="margin-top:8px"><thead><tr><th>Data point</th><th>Read from</th><th>ACORD term</th><th>CDR field*</th><th>Note</th></tr></thead>
               <tbody>${latest.points.map(p => `<tr><td style="font-weight:600">${escapeHtml(p.label || p.key)}${p.core ? ' <span class="chip plain">core</span>' : ''}</td>
                 <td style="font-size:12px">${escapeHtml(p.section || '')} · “${escapeHtml(p.source_label || '')}”${(p.learned_labels || []).map(l => ` <span class="chip differs">also “${escapeHtml(l)}”</span>`).join('')}</td>
-                <td><code style="font-size:11px">${escapeHtml(p.acord)}</code></td><td style="font-size:12px">${escapeHtml(p.cdr || '—')}</td></tr>`).join('')}</tbody></table></details>
+                <td><code style="font-size:11px">${escapeHtml(p.acord)}</code></td><td style="font-size:12px">${escapeHtml(p.cdr || '—')}</td>
+                <td style="font-size:12px;color:var(--mut)">${escapeHtml(p.note || '')}</td></tr>`).join('')}</tbody></table></details>
           </div>`;
         }).join('');
       },
@@ -1487,8 +1553,8 @@
       nav.innerHTML = `
         <a href="#home" class="nav-a" style="opacity:.8"><span class="ic">⌂</span><span>All flows</span></a>
         <div style="font-size:11px;font-weight:700;color:#94a3b8;text-transform:uppercase;letter-spacing:.08em;margin:14px 12px 6px">${escapeHtml(fl.short)}</div>
-        ${fl.views.map(item => `
-          <a href="#${item.id}" class="nav-a ${hash === item.id ? 'active' : ''}">
+        ${fl.views.filter(item => !item.hidden).map(item => `
+          <a href="#${item.id}" class="nav-a ${(hash === item.id || (fl.views.find(v => v.id === hash) || {}).parent === item.id) ? 'active' : ''}">
             <span class="ic">${item.icon}</span>
             <span>${item.label}</span>
           </a>
@@ -1511,6 +1577,7 @@
 
     // Main render
     async function render(quiet) {
+      if (window.__mrcPoll) { clearInterval(window.__mrcPoll); window.__mrcPoll = null; }
       renderNav();
       const hash = (window.location.hash || '#home').slice(1).split('?')[0];
       const viewFn = views[hash] || views.home;

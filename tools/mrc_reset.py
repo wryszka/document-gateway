@@ -14,7 +14,7 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from lib import load_config, sql  # noqa: E402
 
-MRC_TABLES = [("template", "doc_family='mrc'"), ("source_document", "tenant='mrc'"),
+MRC_TABLES = [("template", "doc_family='mrc'"), ("mrc_schema_note", "1=1"), ("mrc_agent_note", "1=1"), ("source_document", "tenant='mrc'"),
               ("mrc_entities", "1=1"), ("mrc_extraction", "1=1"), ("mrc_certainty_check", "1=1"),
               ("graph_nodes", "tenant='mrc'"), ("graph_edges", "tenant='mrc'")]
 

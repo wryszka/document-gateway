@@ -181,6 +181,21 @@ def build(cfg):
               value STRING, source_quote STRING COMMENT 'The source line in the contract the value came from.',
               status STRING COMMENT 'identified | not_found.', confidence DOUBLE, created_at TIMESTAMP
             ) COMMENT 'One row per expected data point per MRC: value, ACORD binding, indicative CDR field and the source quote it was read from.'""",
+        # --- MRC: human descriptions of each schema version (what it is, why it changed)
+        f"""CREATE TABLE IF NOT EXISTS {F}.mrc_schema_note (
+              schema_name STRING, schema_version STRING,
+              description STRING COMMENT 'What this document type is, in the words of the person who recorded it.',
+              change_note STRING COMMENT 'Why this version was recorded (e.g. the layout change accepted).',
+              created_by STRING, created_at TIMESTAMP
+            ) COMMENT 'Append-only notes recorded with each MRC schema version.'""",
+        # --- MRC: what the review agents said (advise-only; every review is kept)
+        f"""CREATE TABLE IF NOT EXISTS {F}.mrc_agent_note (
+              note_id STRING, agent STRING COMMENT 'intake_review | schema_review.',
+              subject STRING COMMENT 'What was reviewed (intake run, document, schema).',
+              facts STRING COMMENT 'JSON of the computed facts the agent was given — its only input.',
+              output STRING COMMENT 'The agent advice, as shown on screen.',
+              model STRING, requested_by STRING, created_at TIMESTAMP
+            ) COMMENT 'Append-only log of agent reviews. Agents advise; they never record a schema or load a contract.'""",
         # --- MRC: contract-certainty check results
         f"""CREATE TABLE IF NOT EXISTS {F}.mrc_certainty_check (
               mrc_id STRING, source_document_id STRING,

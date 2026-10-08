@@ -114,8 +114,11 @@ def schemas(cfg):
     return out
 
 
-def _record_schema(cfg, name, version, fp, field_map, actor, from_doc, decision_type, reason):
+def _record_schema(cfg, name, version, fp, field_map, actor, from_doc, decision_type, reason,
+                   description=None, change_note=None):
     F = cfg["full_schema"]
+    sql(f"""INSERT INTO {F}.mrc_schema_note VALUES (:n,:v,:d,:c,:a,current_timestamp())""",
+        params={"n": name, "v": version, "d": description, "c": change_note or reason, "a": actor}, cfg=cfg)
     sql(f"""INSERT INTO {F}.template VALUES
             (:id,'mrc',:c,'mrc',:v,:fp,:fmap,:n,'active',:actor,current_timestamp())""",
         params={"id": f"TPL-{uuid.uuid4().hex[:8]}", "c": name, "v": version, "fp": json.dumps(fp),
@@ -150,7 +153,10 @@ def preregister_open_market(cfg, actor="Market data team"):
                                               "SUBSCRIPTION AGREEMENT", "FISCAL AND REGULATORY",
                                               "BROKER REMUNERATION AND DEDUCTIONS"])}
     _record_schema(cfg, OPEN_MARKET, "v1", fp, open_market_field_map(cfg), actor, None,
-                   "schema_confirm", "Open-market MRC v3 schema recorded in the repository")
+                   "schema_confirm", "Open-market MRC v3 schema recorded in the repository",
+                   description="Lloyd's open-market Market Reform Contract (MRC v3): one risk placed with a panel "
+                               "of syndicates. The standard placement document of the subscription market.",
+                   change_note="Initial version, recorded by the market data team.")
 
 
 # ------------------------------------------------------------------ extraction against a schema
@@ -379,10 +385,11 @@ def doc_row(cfg, doc_id):
 def changes(cfg, doc_id):
     row = doc_row(cfg, doc_id)
     cls = classify(cfg, row["stored_path"])
+    doc_labels = sorted({f["label"] for f in generic_fields(cls["text"])})
     return {"doc_id": doc_id, "file_name": row["file_name"], "state": row["inbound_state"],
             "outcome": cls["outcome"], "schema": (cls.get("schema") or {}).get("name"),
             "version": (cls.get("schema") or {}).get("version"), "diff": cls.get("diff", []),
-            "points": cls.get("points", [])}
+            "points": cls.get("points", []), "doc_labels": doc_labels}
 
 
 def _bump(v):
@@ -392,28 +399,42 @@ def _bump(v):
         return "v2"
 
 
-def accept_changes(cfg, doc_id, actor="reviewer"):
-    """Record a new version of the schema that has learned the renamed labels, then ingest.
-    Missing data points stay missing — they remain visible as gaps downstream."""
+def accept_changes(cfg, doc_id, actor="reviewer", decisions=None, change_note=None):
+    """Record the next schema version from the person's decision on each changed field:
+    'rename' (learn the label the document uses), 'map' (read it from another field the
+    person picked), or 'gap' (keep it missing — it stays visible as a gap downstream).
+    With no decisions, the proposals are taken as they are (renames learned, missing kept as gaps)."""
     row = doc_row(cfg, doc_id)
     cls = classify(cfg, row["stored_path"])
     if cls["outcome"] != "changed":
         raise ValueError("this document is not flagged as a changed layout")
     sc = cls["schema"]
     fm = json.loads(json.dumps(sc["field_map"]))
-    learned = []
+    decisions = decisions or {}
+    learned, gaps = [], []
     for r in cls["diff"]:
-        if r["change"] == "renamed" and r["found_label"] not in fm[r["key"]].setdefault("labels", []):
-            fm[r["key"]]["labels"].append(r["found_label"])
-            learned.append(f"{r['expected_label']} → {r['found_label']}")
+        dec = decisions.get(r["key"]) or {"action": "rename" if r["change"] == "renamed" else "gap"}
+        action, label = dec.get("action"), (dec.get("label") or "").strip()
+        if action == "rename" and r.get("found_label"):
+            label = r["found_label"]
+        if action in ("rename", "map") and label:
+            if label not in fm[r["key"]].setdefault("labels", []):
+                fm[r["key"]]["labels"].append(label)
+            learned.append(f"{r['expected_label']} → {label}")
+        else:
+            gaps.append(r["data_point"])
+        if dec.get("note"):
+            fm[r["key"]]["description"] = dec["note"]
     new_v = _bump(sc["version"])
+    summary = ("learned " + ", ".join(learned) if learned else "no labels learned") + \
+              ("; accepted gaps: " + ", ".join(gaps) if gaps else "")
     _record_schema(cfg, sc["name"], new_v, sc["fingerprint"], fm, actor, doc_id, "schema_change_accept",
-                   "Accepted layout change: " + (", ".join(learned) or "no renames"))
+                   "Accepted layout change: " + summary, change_note=change_note or ("Accepted layout change: " + summary))
     sc2 = dict(sc, version=new_v, field_map=fm)
     d, quotes, points = extract(cls["text"], sc2)
     _ingest(cfg, doc_id, {"text": cls["text"], "d": d, "points": points, "schema": sc2}, actor)
-    gaps = [p["label"] for p in points if p["status"] != "identified"]
-    return {"schema": sc["name"], "version": new_v, "learned": learned, "gaps": gaps}
+    remaining = [p["label"] for p in points if p["status"] != "identified"]
+    return {"schema": sc["name"], "version": new_v, "learned": learned, "gaps": remaining}
 
 
 # ------------------------------------------------------------------ new -> recognise (schema proposal)
@@ -506,7 +527,7 @@ def _ai_map(cfg, fields, allowed):
         return {}
 
 
-def confirm_new_schema(cfg, doc_id, name, fields, actor="reviewer"):
+def confirm_new_schema(cfg, doc_id, name, fields, actor="reviewer", description=None):
     """A person confirmed the proposal -> record the schema (v1) and ingest the document."""
     row = doc_row(cfg, doc_id)
     if row["inbound_state"] != "new_schema":
@@ -523,13 +544,17 @@ def confirm_new_schema(cfg, doc_id, name, fields, actor="reviewer"):
                 "display": f["label"]}
         if f.get("period_part"):
             spec["period_part"] = f["period_part"]
+        if (f.get("note") or "").strip():
+            spec["description"] = f["note"].strip()
         fm[f["key"]] = spec
     if not fm:
         raise ValueError("no fields selected")
     names = {s["name"] for s in schemas(cfg)}
     if name in names:
         raise ValueError("a schema with that name already exists")
-    _record_schema(cfg, name, "v1", fp, fm, actor, doc_id, "schema_confirm", "Confirmed a newly recognised schema")
+    _record_schema(cfg, name, "v1", fp, fm, actor, doc_id, "schema_confirm", "Confirmed a newly recognised schema",
+                   description=(description or "").strip() or None,
+                   change_note="Initial version, recognised from " + row["file_name"])
     sc = {"name": name, "version": "v1", "fingerprint": fp, "field_map": fm}
     d, quotes, points = extract(text, sc)
     _ingest(cfg, doc_id, {"text": text, "d": d, "points": points, "schema": sc}, actor)
