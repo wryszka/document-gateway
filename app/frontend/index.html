@@ -252,6 +252,7 @@
             <div class="tile"><div class="k">Resolved by a person</div><div class="v">${(c.rejected || 0) + (c.returned_to_broker || 0)}</div></div>
             <div class="tile"><div class="k">Total</div><div class="v">${d.documents.length}</div></div>
           </div>
+          <div id="mrcPdfViewer"></div>
           <div class="card"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
             <h2 style="margin:0">Documents</h2>
             <button class="ghost" id="mrcResetBtn" ${busy ? 'disabled' : ''} title="Return this flow to the demo starting point">↺ Reset demo</button></div>
@@ -260,7 +261,7 @@
               <td style="font-weight:600">${escapeHtml(x.file_name)}</td>
               <td>${escapeHtml(x.counterparty || '—')}</td>
               <td><span class="chip ${m(x.inbound_state)[0]}">${escapeHtml(m(x.inbound_state)[1])}</span></td>
-              <td style="white-space:nowrap">${act(x)}</td></tr>`).join('')}</tbody></table></div>
+              <td style="white-space:nowrap"><button class="ghost" data-mrc-view="${escapeAttr(x.doc_id)}" data-name="${escapeAttr(x.file_name)}">View</button> ${act(x)}</td></tr>`).join('')}</tbody></table></div>
           <script>
             document.querySelectorAll('[data-mrc-review]').forEach(function(b){
               b.addEventListener('click', async function(){
@@ -272,6 +273,20 @@
                   toast(action === 'reject' ? 'Rejected — decision recorded' : 'Returned to broker — decision recorded');
                   render();
                 }catch(e){ toast('Error: '+e.message); }
+              });
+            });
+            document.querySelectorAll('[data-mrc-view]').forEach(function(b){
+              b.addEventListener('click', function(){
+                var id = b.getAttribute('data-mrc-view');
+                var url = '/api/mrc/pdf/' + encodeURIComponent(id);
+                var box = document.getElementById('mrcPdfViewer');
+                box.innerHTML = '<div class="card"><div style="display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:10px">'
+                  + '<h2 style="margin:0">' + escapeHtml(b.getAttribute('data-name')) + '</h2>'
+                  + '<div style="display:flex;gap:8px"><a class="ghost" style="text-decoration:none;padding:7px 12px;border-radius:8px" href="' + url + '" target="_blank" rel="noopener">Open in new tab ↗</a>'
+                  + '<button class="ghost" id="mrcPdfClose">Close</button></div></div>'
+                  + '<iframe src="' + url + '" title="PDF preview" style="width:100%;height:720px;border:1px solid var(--line);border-radius:8px;background:#fff"></iframe></div>';
+                document.getElementById('mrcPdfClose').addEventListener('click', function(){ box.innerHTML = ''; });
+                box.scrollIntoView({behavior:'smooth', block:'start'});
               });
             });
             document.getElementById('mrcResetBtn').addEventListener('click', async function(){
@@ -497,7 +512,7 @@
           <div class="card"><h2 style="margin-top:0">Every value, and the line it came from</h2>
             <table><thead><tr><th>Data point</th><th>Value</th><th>MRC section</th><th>Source line in the contract</th><th>ACORD term</th></tr></thead>
             <tbody>${rows}</tbody></table>
-            <div style="margin-top:10px;font-size:12px"><a href="${escapeAttr(d.download)}" target="_blank" rel="noopener">Open the original PDF in the governed volume ↗</a></div></div>`;
+            <div style="margin-top:10px;font-size:12px"><a href="${escapeAttr(d.pdf)}" target="_blank" rel="noopener">Open the original PDF ↗</a> · <a href="${escapeAttr(d.download)}" target="_blank" rel="noopener">see it in the governed volume ↗</a></div></div>`;
       },
 
       'mrc_audit': async function() {

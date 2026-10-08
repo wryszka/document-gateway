@@ -33,6 +33,7 @@ Format per beat: **GO** (where) · **DO** (the one action) · **SAY** (≤20 wor
 - **GO:** 1. Market Reform Contract → **Inbox**.
 - **DO:** point at the tiles.
 - **SAY:** "**Five** contracts and **one** cover note arrived. Nothing is recorded yet — the system has never seen an MRC."
+- **OPTIONAL:** press **View** on a contract to show the PDF itself (preview opens above the list; *Open in new tab* uses the browser's viewer).
 
 ## Beat 2 — Recognition against the expected data points (4 min)
 - **GO:** **Schema Recognition**.
@@ -71,6 +72,7 @@ Format per beat: **GO** (where) · **DO** (the one action) · **SAY** (≤20 wor
 - **GO:** **Lineage** (or *lineage →* on a contract).
 - **DO:** choose the cyber contract; point at *Signed lines total*.
 - **SAY:** "Every value shows the line it was read from. **97.5%** is the sum of four signed lines — here they are."
+- **DO (optional):** *Open the original PDF ↗* at the bottom — the same lines in the contract itself.
 
 ## Beat 8 — Metrics, corrected in place (2 min)
 - **GO:** **Metrics**.

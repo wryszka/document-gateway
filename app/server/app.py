@@ -491,6 +491,23 @@ def mrc_inbox():
             "job": {"running": _MRC_JOB["running"], "kind": _MRC_JOB["kind"]}}
 
 
+@app.get("/api/mrc/pdf/{doc_id}")
+def mrc_pdf(doc_id: str):
+    """Serve the original PDF for a tracked MRC document, inline, so the browser's own
+    viewer shows it. The path comes from source_document (never from the request), so
+    only documents the gateway has registered can be opened."""
+    r = q(f"SELECT stored_path, file_name FROM {F}.source_document WHERE doc_id=:d AND tenant='mrc'",
+          {"d": doc_id})
+    if not r:
+        raise HTTPException(404, "no such document")
+    path, fname = r[0]
+    data = _W.files.download(path).contents.read()
+    safe = "".join(ch for ch in fname if ch.isalnum() or ch in "._-") or "document.pdf"
+    return Response(content=data, media_type="application/pdf",
+                    headers={"Content-Disposition": f'inline; filename="{safe}"',
+                             "Cache-Control": "no-store"})
+
+
 @app.get("/api/mrc/propose")
 def mrc_propose():
     """Recognition checklist for the first awaiting MRC — expected ACORD data points, all/some."""
@@ -610,7 +627,8 @@ def mrc_lineage(mrc_id: str):
             FROM {F}.v_mrc_extraction_latest WHERE mrc_id=:m ORDER BY section, label""",
         ["label", "acord_binding", "cdr_field", "section", "value", "source_quote", "status", "confidence"],
         {"m": mrc_id})
-    return {"contract": head[0], "points": pts, "download": uc_link("volume", CFG["volume"])}
+    return {"contract": head[0], "points": pts, "download": uc_link("volume", CFG["volume"]),
+            "pdf": f"/api/mrc/pdf/{head[0]['doc_id']}"}
 
 
 @app.get("/api/mrc/audit")
