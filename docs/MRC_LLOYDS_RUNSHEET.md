@@ -10,14 +10,16 @@ Format per beat: **GO** (where) · **DO** (the one action) · **SAY** (≤20 wor
 
 ## Pre-flight (the morning of, ~10 min)
 
-1. **Reset to the clean start** (from the repo): `uv run --with databricks-sdk,openpyxl,reportlab python tools/orchestrate.py --reset`
-   (or MRC only, faster: `PYTHONPATH=. uv run --with databricks-sdk,openpyxl python tools/mrc_reset.py`).
-   Expected Inbox: **5 awaiting recognition, 1 needs review, no schema recorded**.
-2. **Warm the warehouse** — open the app, click Inbox, then Schema Recognition once (the first query after idle is slow). Do not press Confirm.
+1. **Reset to the clean start** — open the app → **1. Market Reform Contract** → **Inbox** → **↺ Reset demo** (top right of the Documents card) → Confirm. A banner shows while it runs (about a minute); the documents reappear as they are re-staged.
+   Expected Inbox afterwards: **5 awaiting recognition, 1 needs review, no schema recorded**.
+   The button is disabled while contracts are being processed; reset and processing never overlap.
+   *Fallback (command line, from the repo):* `PYTHONPATH=. uv run --with databricks-sdk,openpyxl python tools/mrc_reset.py --no-regenerate`
+2. **Warm the warehouse** — after the reset, click Schema Recognition once (the first query after idle is slow). Do not press Confirm.
 3. **Warm Ask** — on Contracts & Ask, ask one throwaway question (both answers should appear).
-4. Open the app in its own browser window: https://document-gateway-7474656169654171.aws.databricksapps.com → **1. Market Reform Contract**.
+4. Keep the app in its own browser window: https://document-gateway-7474656169654171.aws.databricksapps.com → **1. Market Reform Contract**.
 
 **Ordering guards:** do not press *Confirm & register* until beat 3. Do not resolve the cover note until beat 4.
+**Between rehearsals:** press **↺ Reset demo** on the Inbox to start again.
 
 ---
 

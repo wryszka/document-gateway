@@ -232,7 +232,9 @@
           returned_to_broker: ['plain', 'Returned to broker']
         };
         const m = s => META[s] || ['plain', s];
-        const busy = (c.processing || 0) > 0;
+        const job = d.job || {};
+        const resetting = job.running && job.kind === 'reset';
+        const busy = (c.processing || 0) > 0 || job.running;
         const act = x => x.inbound_state === 'unrecognised'
           ? `<button class="ghost" data-mrc-review="reject" data-doc="${escapeAttr(x.doc_id)}">Reject — not an MRC</button>
              <button class="ghost" data-mrc-review="return" data-doc="${escapeAttr(x.doc_id)}">Return to broker</button>` : '';
@@ -241,7 +243,8 @@
             <div class="body">Every document that has arrived and where it is in the loop. A contract that matches the recorded schema is recognised and ingested automatically. Anything that doesn't match is held for a person to decide — it never lands on its own.</div>
           </details>
           ${!d.schema_registered ? '<div class="banner">No MRC schema recorded yet — open <b>Schema Recognition</b> to confirm the first contract. After that, matching contracts flow straight through.</div>' : ''}
-          ${busy ? '<div class="banner"><span class="spin"></span> Processing contracts against the recorded schema — they appear as recognised one by one.</div>' : ''}
+          ${resetting ? '<div class="banner"><span class="spin"></span> Resetting the demo to its starting point — about a minute. The documents reappear as they are re-staged.</div>'
+            : (busy ? '<div class="banner"><span class="spin"></span> Processing contracts against the recorded schema — they appear as recognised one by one.</div>' : '')}
           <div class="tiles">
             <div class="tile"><div class="k">Awaiting recognition</div><div class="v warn">${(c.awaiting_recognition || 0) + (c.processing || 0)}</div></div>
             <div class="tile"><div class="k">Recognised</div><div class="v pos">${c.recognised || 0}</div></div>
@@ -249,7 +252,9 @@
             <div class="tile"><div class="k">Resolved by a person</div><div class="v">${(c.rejected || 0) + (c.returned_to_broker || 0)}</div></div>
             <div class="tile"><div class="k">Total</div><div class="v">${d.documents.length}</div></div>
           </div>
-          <div class="card"><h2 style="margin-top:0">Documents</h2>
+          <div class="card"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+            <h2 style="margin:0">Documents</h2>
+            <button class="ghost" id="mrcResetBtn" ${busy ? 'disabled' : ''} title="Return this flow to the demo starting point">↺ Reset demo</button></div>
             <table><thead><tr><th>File</th><th>Broker</th><th>State</th><th></th></tr></thead>
             <tbody>${d.documents.map(x => `<tr>
               <td style="font-weight:600">${escapeHtml(x.file_name)}</td>
@@ -268,6 +273,15 @@
                   render();
                 }catch(e){ toast('Error: '+e.message); }
               });
+            });
+            document.getElementById('mrcResetBtn').addEventListener('click', async function(){
+              var c = await confirm('Reset the MRC demo to its starting point? This clears the recorded schema, the processed contracts, their checks, the decisions and the audit trail for this flow, then re-stages the five contracts and the cover note. It takes about a minute.');
+              if(!c.confirmed){ return; }
+              try{
+                await fetchJSON('/api/mrc/reset',{method:'POST',body:{}});
+                toast('Resetting the demo…');
+                setTimeout(function(){ render(); }, 1500);
+              }catch(e){ toast('Could not reset: '+e.message); }
             });
             if (${busy ? 'true' : 'false'}) {
               setTimeout(function(){ if((window.location.hash||'').indexOf('#mrc_inbox')===0){ render(); } }, 2500);

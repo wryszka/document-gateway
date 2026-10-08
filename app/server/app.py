@@ -487,7 +487,8 @@ def mrc_inbox():
     counts = {}
     for d in docs:
         counts[d["inbound_state"]] = counts.get(d["inbound_state"], 0) + 1
-    return {"documents": docs, "state_counts": counts, "schema_registered": mrc.schema_registered(CFG)}
+    return {"documents": docs, "state_counts": counts, "schema_registered": mrc.schema_registered(CFG),
+            "job": {"running": _MRC_JOB["running"], "kind": _MRC_JOB["kind"]}}
 
 
 @app.get("/api/mrc/propose")
@@ -496,7 +497,7 @@ def mrc_propose():
     return mrc.propose_first(CFG)
 
 
-_MRC_JOB = {"running": False, "result": None}
+_MRC_JOB = {"running": False, "result": None, "kind": None}
 
 
 @app.post("/api/mrc/confirm")
@@ -507,10 +508,12 @@ def mrc_confirm(body: dict = Body(...)):
     actor = body.get("actor", "reviewer")
     first = q(f"""SELECT doc_id FROM {F}.source_document WHERE tenant='mrc'
                   AND status='awaiting_recognition' ORDER BY ingested_at LIMIT 1""")
+    if _MRC_JOB["running"] and _MRC_JOB["kind"] == "reset":
+        raise HTTPException(409, "The demo is being reset — try again when it finishes")
     reg = mrc.register_schema(CFG, actor=actor, from_doc=first[0][0] if first else None)
     if not _MRC_JOB["running"]:
         def run():
-            _MRC_JOB.update(running=True, result=None)
+            _MRC_JOB.update(running=True, result=None, kind="processing")
             try:
                 _MRC_JOB["result"] = mrc.rescan(CFG, actor="mrc-pipeline")
             finally:
@@ -523,7 +526,30 @@ def mrc_confirm(body: dict = Body(...)):
 def mrc_progress():
     states = {r[0]: int(r[1]) for r in q(
         f"SELECT inbound_state, count(*) FROM {F}.source_document WHERE tenant='mrc' GROUP BY inbound_state")}
-    return {"running": _MRC_JOB["running"], "result": _MRC_JOB["result"], "states": states}
+    return {"running": _MRC_JOB["running"], "kind": _MRC_JOB["kind"], "result": _MRC_JOB["result"], "states": states}
+
+
+@app.post("/api/mrc/reset")
+def mrc_reset_demo(body: dict = Body(default={})):
+    """Return the MRC flow to its demo starting point (the in-app version of
+    tools/mrc_reset.py): clears the recorded schema, processed contracts, checks, graph rows,
+    decisions and this flow's audit trail, then re-stages the five contracts and the cover
+    note. Runs in the background (~1 min); refuses while another MRC job is running.
+    The PDFs are not regenerated here, so the Knowledge Assistant index stays valid."""
+    import threading
+    if _MRC_JOB["running"]:
+        raise HTTPException(409, "Contracts are still being processed — try again when it finishes")
+    from tools.mrc_reset import reset as _reset
+
+    def run():
+        _MRC_JOB.update(running=True, result=None, kind="reset")
+        try:
+            states = _reset(CFG, regenerate=False)
+            _MRC_JOB["result"] = {k: int(v) for k, v in states}
+        finally:
+            _MRC_JOB["running"] = False
+    threading.Thread(target=run, daemon=True).start()
+    return {"resetting": True}
 
 
 @app.post("/api/mrc/review")
