@@ -102,6 +102,11 @@ Format per beat: **GO** (where) · **DO** (the one action) · **SAY** (≤20 wor
 
 ---
 
+## If asked "what's behind the screen?" — at any point
+- **GO:** **Learn — how it works** (bottom of the menu) → *Architecture*.
+- **DO:** read the five-line one-minute answer, then point at the diagram left to right: arrives → read & recognise → extract & check → governed tables → used by. The colours show what is deterministic, what is AI, where a person decides, and what is governed.
+- **IF PRESSED:** *What happens when you press…* (each button, what runs, what it writes) · *What runs where — the honest version* · *Open the real thing* (every table with live row counts, linked to the workspace).
+
 ## Cut order (if short of time)
 Cut 7 (show it inside beat 10) → cut the optional part of 9 → cut 3 (mention the agent in beat 10) → cut 6. Never cut 2, 4, 5, 8.
 

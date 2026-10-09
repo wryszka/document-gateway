@@ -513,6 +513,57 @@ def _grant_summary(grants):
     return "; ".join(parts) or "no grants beyond the owner"
 
 
+MRC_ASSETS = [  # (table, what it holds) — every governed object behind the MRC screens
+    ("source_document", "One row per document received: file, governed path, state, schema version, when."),
+    ("template", "The schema repository: each schema version, its fingerprint and data points (append-only)."),
+    ("mrc_schema_note", "Each schema version's description and change note, in the words of the person who recorded it."),
+    ("mrc_entities", "One row per contract: the headline values (UMR, insured, class, broker, premium, leader, signed lines)."),
+    ("mrc_extraction", "Every value of every contract with its MRC section, ACORD term, CDR field and source line."),
+    ("mrc_certainty_check", "The seven market-rule results for every contract."),
+    ("graph_nodes", "The contract as a graph: policy, insured, broker, placement, syndicates, clauses (with provenance)."),
+    ("graph_edges", "How those graph nodes relate (placed by, subscribed by, issued to)."),
+    ("decision", "Every human decision: who, when, what and why (append-only)."),
+    ("audit_event", "Every event: received, matched, flagged, accepted, recognised, returned, corrected."),
+    ("mrc_agent_note", "Every agent review: the facts it was given, what it said, who asked, which model."),
+    ("dictionary_entity", "The ACORD-aligned vocabulary every schema maps into."),
+]
+
+
+@app.get("/api/mrc/learn")
+def mrc_learn():
+    """Live pointers for the architecture panel: every governed object, with its row count
+    and a link to it in the workspace, plus the services the flow calls."""
+    g = CFG.get("genie", {})
+    counts = {}
+    for t, _ in MRC_ASSETS:
+        try:
+            w = {"source_document": "WHERE tenant='mrc'", "template": "WHERE doc_family='mrc'",
+                 "graph_nodes": "WHERE tenant='mrc'", "graph_edges": "WHERE tenant='mrc'",
+                 "decision": "WHERE tenant='mrc'"}.get(t, "")
+            counts[t] = int(q(f"SELECT count(*) FROM {F}.{t} {w}")[0][0])
+        except Exception:
+            counts[t] = None
+    return {
+        "schema": f"{CFG['catalog']}.{CFG['schema']}",
+        "tables": [{"name": t, "what": w, "rows": counts[t], "url": uc_link("table", t)} for t, w in MRC_ASSETS],
+        "volume": {"path": f"{CFG['volume_path']}/mrc_inbox  ·  /mrc_archive", "url": uc_link("volume", CFG["volume"])},
+        "services": [
+            {"name": "SQL warehouse (serverless)", "what": "Runs every query and the ai_parse_document / ai_query calls",
+             "url": f"{HOST}/sql/warehouses/{CFG['warehouse_id']}"},
+            {"name": "ai_parse_document", "what": "Reads each PDF into text and layout inside the platform", "url": ""},
+            {"name": f"Foundation Model API — {CFG['models']['narrate']}", "what": "Claude: proposes mappings for a new schema; writes the agent reviews",
+             "url": f"{HOST}/ml/endpoints/{CFG['models']['narrate']}"},
+            {"name": "Genie space — Ask the MRCs", "what": "Answers questions by writing SQL over the governed tables",
+             "url": f"{HOST}/genie/rooms/{g.get('mrc_space_id', '')}" if g.get("mrc_space_id") else ""},
+            {"name": "Knowledge Assistant (Agent Bricks)", "what": "Answers from the contract wording; indexes the PDFs in the volume",
+             "url": f"{HOST}/ml/endpoints/{g.get('mrc_ka_endpoint', '')}" if g.get("mrc_ka_endpoint") else ""},
+            {"name": "Databricks App — document-gateway", "what": "This screen: FastAPI + a single-page front end, signed in with your workspace identity",
+             "url": f"{HOST}/apps/document-gateway"},
+        ],
+        "models": CFG["models"],
+    }
+
+
 @app.get("/api/mrc/dashboard")
 def mrc_dashboard():
     """What is in the book: every loaded contract (earlier ones and today's), by month, class,

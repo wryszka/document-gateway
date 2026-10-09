@@ -71,6 +71,25 @@
     .custody .e{font-size:12.5px;color:var(--slate2);margin-top:4px;line-height:1.5}
     .ans{border-left:4px solid #3b82f6;padding:12px 16px}
     .ans .a{font-weight:700;font-size:14.5px;color:var(--ink)}
+    .arch{display:grid;grid-template-columns:1fr 26px 1.25fr 26px 1.1fr 26px 1.25fr 26px 1.15fr;align-items:stretch;gap:0;margin-top:8px}
+    .arch .lane{display:flex;flex-direction:column;gap:8px}
+    .arch .lh{font-size:10.5px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;color:var(--mut);text-align:center;margin-bottom:2px}
+    .arch .bx{border-radius:10px;padding:9px 11px;font-size:12px;line-height:1.35;border:1px solid;background:#fff}
+    .arch .bx b{display:block;font-size:12.5px;margin-bottom:2px}
+    .arch .bx small{color:var(--mut);font-size:11px}
+    .arch .p{border-color:#93c5fd;background:#eff6ff}
+    .arch .ai{border-color:#c4b5fd;background:#f5f3ff}
+    .arch .hu{border-color:#fcd34d;background:#fffbeb}
+    .arch .uc{border-color:#86efac;background:#f0fdf4}
+    .arch .fu{border-style:dashed;border-color:#cbd5e1;background:#f8fafc;color:var(--mut)}
+    .arch .ar{display:flex;align-items:center;justify-content:center;color:#94a3b8;font-size:20px;font-weight:800}
+    .arch-gov{margin-top:12px;border:1px solid #86efac;background:#f0fdf4;border-radius:10px;padding:9px 12px;font-size:12.5px;text-align:center}
+    .arch-key{display:flex;gap:14px;flex-wrap:wrap;font-size:11.5px;color:var(--slate2);margin-top:10px}
+    .arch-key span:before{content:'';display:inline-block;width:11px;height:11px;border-radius:3px;margin-right:5px;vertical-align:-1px;border:1px solid}
+    .arch-key .k1:before{background:#eff6ff;border-color:#93c5fd}.arch-key .k2:before{background:#f5f3ff;border-color:#c4b5fd}
+    .arch-key .k3:before{background:#fffbeb;border-color:#fcd34d}.arch-key .k4:before{background:#f0fdf4;border-color:#86efac}
+    .arch-key .k5:before{background:#f8fafc;border-color:#cbd5e1;border-style:dashed}
+    @media(max-width:1100px){.arch{grid-template-columns:1fr}.arch .ar{transform:rotate(90deg);height:24px}}
     @media(max-width:820px){
       .main{padding:16px 20px}
       .tiles{grid-template-columns:1fr}
@@ -138,7 +157,7 @@
           {id:'mrc', label:'Contracts & Ask', hidden:true, parent:'mrc_analytics'},
           {id:'mrc_governance', label:'Governance', icon:'🛡️', cap:'Who approved what'},
           {id:'mrc_audit', label:'Audit', hidden:true, parent:'mrc_governance'},
-          {id:'learn', label:'Learn — how it works', icon:'ℹ️', bottom:true}
+          {id:'mrc_learn', label:'Learn — how it works', icon:'ℹ️', bottom:true}
         ]},
       bordereaux: {label:'Bordereaux', short:'Bordereaux', icon:'📊', sub:'Delegated authority · premium & claims',
         views:[
@@ -938,6 +957,116 @@
           <script>
             document.getElementById('govPick').addEventListener('change', function(){ window.location.hash = '#mrc_governance?m=' + encodeURIComponent(this.value); });
           <\/script>`;
+      },
+
+      'mrc_learn': async function() {
+        const qs = new URLSearchParams((window.location.hash.split('?')[1]) || '');
+        const tab = qs.get('t') || 'arch';
+        const tabs = `<div style="border-bottom:1px solid var(--line);margin-bottom:16px">${[['arch', 'Architecture — what is behind the screen'], ['how', 'Activities — how each one is done']].map(([id, l]) =>
+          `<a href="#mrc_learn?t=${id}" style="display:inline-block;padding:9px 16px;margin-right:4px;border-radius:9px 9px 0 0;text-decoration:none;font-weight:600;${tab === id ? 'background:var(--card);color:var(--ink);border:1px solid var(--line);border-bottom-color:var(--card)' : 'color:var(--mut)'}">${l}</a>`).join('')}</div>`;
+        if (tab === 'how') return tabs + await views.learn();
+        const L = await fetchJSON('/api/mrc/learn');
+        const link = (u, t) => u ? `<a href="${escapeAttr(u)}" target="_blank" rel="noopener">${escapeHtml(t)} ↗</a>` : escapeHtml(t);
+        const bx = (cls, t, d) => `<div class="bx ${cls}"><b>${t}</b>${d}</div>`;
+        const ar = '<div class="ar">→</div>';
+        const diagram = `<div class="card">
+          <h2 style="margin-top:0">The architecture on one page</h2>
+          <div class="arch">
+            <div class="lane"><div class="lh">1 · Arrives</div>
+              ${bx('p', 'Broker sends an MRC', 'PDF, as today — no change for the broker')}
+              ${bx('uc', 'Unity Catalog volume', 'Governed file store: <small>landing/mrc_inbox (today) · mrc_archive (earlier)</small>')}
+              ${bx('fu', 'Later: structured feeds', 'Placing-platform data lands in the same tables, skipping the reading step')}</div>${ar}
+            <div class="lane"><div class="lh">2 · Read &amp; recognise</div>
+              ${bx('p', 'ai_parse_document', 'Platform function turns the PDF into text and layout (runs in the SQL warehouse)')}
+              ${bx('p', 'Fingerprint match', 'Title + section headings compared with the schema repository → <small>known · changed · new · not an MRC</small>')}
+              ${bx('hu', 'A person decides', 'Changed layout → accept / map / gap. New type → confirm the schema. Not an MRC → return.')}
+              ${bx('ai', 'Claude proposes', 'Suggests ACORD mappings for an unfamiliar schema — a proposal only')}</div>${ar}
+            <div class="lane"><div class="lh">3 · Extract &amp; check</div>
+              ${bx('p', 'Values read by rule', 'From the MRC sections and labels of the recorded schema version — <small>each value keeps its source line</small>')}
+              ${bx('p', '7 market rules', 'Fully signed · several liability · sanctions · period · UMR · leader on security · governing law')}
+              ${bx('p', 'Contract graph', 'Policy, insured, broker, placement, syndicates — with provenance')}</div>${ar}
+            <div class="lane"><div class="lh">4 · Governed tables</div>
+              ${bx('uc', 'Contracts &amp; values', '<small>mrc_entities · mrc_extraction · mrc_certainty_check · graph_nodes/edges</small>')}
+              ${bx('uc', 'Schemas &amp; vocabulary', '<small>template (versions) · mrc_schema_note · dictionary_entity (ACORD)</small>')}
+              ${bx('uc', 'The record', '<small>decision · audit_event · mrc_agent_note</small> — append-only')}</div>${ar}
+            <div class="lane"><div class="lh">5 · Used by</div>
+              ${bx('p', 'This app', 'Databricks App: reads the tables, shows them, records your decisions')}
+              ${bx('ai', 'Genie', 'Writes SQL over the governed tables — the query is shown')}
+              ${bx('ai', 'Knowledge Assistant', 'Agent Bricks over the PDFs — answers from the wording')}
+              ${bx('ai', 'Review agents', 'Claude reads computed facts and advises — logged, cannot act')}
+              ${bx('fu', 'Notebooks · BI · Delta Sharing', 'Same tables, same permissions — no copy')}</div>
+          </div>
+          <div class="arch-gov"><b>Across every step — Unity Catalog:</b> one set of permissions for the app, Genie, notebooks and agents · lineage from every value to its line in the PDF · every decision and event recorded, nothing edited or deleted</div>
+          <div class="arch-key"><span class="k1">platform, deterministic</span><span class="k2">AI (proposes / answers / advises)</span><span class="k3">a person decides</span><span class="k4">governed in Unity Catalog</span><span class="k5">not built in this demo</span></div>
+        </div>`;
+        const minute = `<div class="card" style="border-left:4px solid #3b82f6">
+          <h2 style="margin-top:0">"What's behind the screen?" — the one-minute answer</h2>
+          <ol style="margin:0 0 0 18px;line-height:1.65;font-size:14px">
+            <li><b>Everything lives in one Databricks workspace.</b> The PDFs sit in a governed Unity Catalog volume; every result is a Delta table in one schema (<code>${escapeHtml(L.schema)}</code>).</li>
+            <li><b>Reading is a platform function.</b> <code>ai_parse_document</code> turns each PDF into text inside the SQL warehouse — nothing leaves the workspace.</li>
+            <li><b>Values are read by rule, not guessed.</b> The document is matched to a recorded schema by its title and section headings, and each value is taken from its labelled line. That is why every number can show the exact line it came from.</li>
+            <li><b>AI proposes and answers; people decide.</b> Claude suggests mappings for an unfamiliar schema and writes advisory reviews; Genie and the Knowledge Assistant answer questions. Only a person records a schema or accepts a change, under their own sign-in.</li>
+            <li><b>The screen is a thin window.</b> It shows the governed tables and records decisions. The same tables answer Genie, a notebook or a BI tool, under the same Unity Catalog permissions.</li>
+          </ol></div>`;
+        const press = [
+          ['Run intake', 'For each received PDF: parse → fingerprint → match against the repository → known ones are read, checked and loaded; others are flagged.', 'source_document, mrc_entities, mrc_extraction, mrc_certainty_check, graph, audit_event'],
+          ['Review changes → Accept', 'Your choices (rename / map / gap) become the next schema version with the learned labels; the document is then read with it.', 'template (new version), mrc_schema_note, decision, + the contract tables'],
+          ['Recognise → Confirm', 'Known fields are reused, Claude proposes the rest; on confirm, the new schema is recorded and the document is read with it.', 'template, mrc_schema_note, decision, + the contract tables'],
+          ['Return to broker / Reject', 'The document is held, never loaded; the decision and reason are recorded.', 'source_document (state), decision, audit_event'],
+          ['🤖 Review agents', 'The system computes the facts (counts, checks, diffs); Claude writes advice from those facts only.', 'mrc_agent_note, audit_event'],
+          ['Ask', 'The same question goes to Genie (SQL over the tables) and to the Knowledge Assistant (search over the PDFs).', 'nothing — read only'],
+          ['Correct a value', 'The headline value is updated; the old and new values and who changed it are recorded.', 'mrc_entities, decision, audit_event'],
+          ['↺ Reset demo', 'Clears today\'s intake and everything it produced; keeps the contracts loaded earlier; re-records schema v1.', 'all of the above (today\'s rows only)']];
+        const pressT = `<div class="card"><h2 style="margin-top:0">What happens when you press…</h2><table><thead><tr><th style="width:170px">Button</th><th>What runs</th><th>What it writes</th></tr></thead>
+          <tbody>${press.map(r => `<tr><td style="font-weight:700">${escapeHtml(r[0])}</td><td style="font-size:13px">${escapeHtml(r[1])}</td><td style="font-size:12px;color:var(--slate2)"><code style="font-size:11.5px">${escapeHtml(r[2])}</code></td></tr>`).join('')}</tbody></table></div>`;
+        const screens = [
+          ['1 Intake', 'source_document, audit_event; the PDF from the volume'],
+          ['2 Schemas', 'template, mrc_schema_note, dictionary_entity'],
+          ['3 Contracts', 'mrc_entities, mrc_extraction, mrc_certainty_check, audit_event; the PDF'],
+          ['4 Analytics', 'mrc_entities and its views; Genie space; Knowledge Assistant'],
+          ['5 Governance', 'template, mrc_schema_note, decision, audit_event, mrc_agent_note; Unity Catalog grants']];
+        const runs = `<div class="card"><h2 style="margin-top:0">What runs where — the honest version</h2>
+          <table><thead><tr><th>Part</th><th>In this demo</th><th>In a production build</th></tr></thead><tbody>
+            <tr><td style="font-weight:700">Files, tables, permissions, lineage</td><td>Unity Catalog volume + Delta tables, one schema</td><td>Same</td></tr>
+            <tr><td style="font-weight:700">Reading the PDF</td><td><code>ai_parse_document</code> in the serverless SQL warehouse</td><td>Same, in a scheduled pipeline</td></tr>
+            <tr><td style="font-weight:700">Picking up new files</td><td>The <b>Run intake</b> button</td><td>Auto Loader / file-arrival trigger on the volume</td></tr>
+            <tr><td style="font-weight:700">Orchestrating the steps</td><td>Python inside the app (one step at a time, in the background)</td><td>Databricks Jobs + Unity Catalog functions</td></tr>
+            <tr><td style="font-weight:700">Who may approve a schema</td><td>Anyone who can open the app; recorded under their sign-in</td><td>A Unity Catalog permission on the approve function (and four-eyes)</td></tr>
+            <tr><td style="font-weight:700">Agents</td><td>Claude via the Foundation Model API, called from SQL (<code>ai_query</code>)</td><td>Agent Framework agent behind AI Gateway, tools as UC functions</td></tr>
+            <tr><td style="font-weight:700">Ask</td><td>Genie space + Knowledge Assistant (Agent Bricks)</td><td>Same</td></tr>
+          </tbody></table>
+          <h3>Where each screen reads from</h3><table><tbody>${screens.map(r => `<tr><td style="font-weight:700;width:150px">${r[0]}</td><td style="font-size:12.5px"><code style="font-size:11.5px">${escapeHtml(r[1])}</code></td></tr>`).join('')}</tbody></table></div>`;
+        const ai = `<div class="card"><h2 style="margin-top:0">What the AI does — and does not do</h2>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
+            <div><div style="font-weight:800;color:#6d28d9;margin-bottom:6px">Does</div><ul style="margin:0 0 0 18px;line-height:1.6;font-size:13px">
+              <li>Turns each PDF into text (<code>ai_parse_document</code>)</li>
+              <li>Proposes ACORD mappings for a schema it has not seen</li>
+              <li>Builds the wider contract graph for today's intake (clauses, limits)</li>
+              <li>Writes advisory reviews from facts the system computed</li>
+              <li>Answers questions: Genie writes SQL, the Knowledge Assistant quotes wording</li></ul></div>
+            <div><div style="font-weight:800;color:#b45309;margin-bottom:6px">Does not</div><ul style="margin:0 0 0 18px;line-height:1.6;font-size:13px">
+              <li>Supply any headline value — values are read by rule from labelled lines</li>
+              <li>Record a schema, accept a change or load a contract</li>
+              <li>Decide a market-rule result — those are plain rules</li>
+              <li>See anything outside the workspace or this schema's permissions</li>
+              <li>Act without a record — every review is logged with its inputs</li></ul></div></div></div>`;
+        const assets = `<div class="card"><h2 style="margin-top:0">Open the real thing</h2>
+          <div style="font-size:12.5px;color:var(--mut);margin-bottom:8px">Every box in the diagram is a live object in the workspace. Row counts are read now.</div>
+          <table><thead><tr><th>Table</th><th>What it holds</th><th class="num">Rows</th></tr></thead><tbody>
+          ${L.tables.map(t => `<tr><td style="white-space:nowrap">${link(t.url, t.name)}</td><td style="font-size:12.5px">${escapeHtml(t.what)}</td><td class="num">${t.rows == null ? '—' : t.rows.toLocaleString()}</td></tr>`).join('')}
+          <tr><td>${link(L.volume.url, 'landing (volume)')}</td><td style="font-size:12.5px">The original PDFs, unchanged: <code style="font-size:11px">${escapeHtml(L.volume.path)}</code></td><td></td></tr></tbody></table>
+          <h3>Services it calls</h3><table><tbody>${L.services.map(x => `<tr><td style="font-weight:600;white-space:nowrap">${link(x.url, x.name)}</td><td style="font-size:12.5px">${escapeHtml(x.what)}</td></tr>`).join('')}</tbody></table></div>`;
+        const faq = [
+          ['Is this a product?', 'No — an open example built on standard Databricks services, meant to be forked. The code is public; every piece is replaceable.'],
+          ['Could it run in our workspace?', 'Yes. It is made only of standard objects — a volume, Delta tables, a Databricks App, a Genie space and a Knowledge Assistant — and the scripts in the repository build them in any Unity Catalog workspace; you point them at your catalog.'],
+          ['Does any data leave the workspace?', 'No. Parsing, the models (Foundation Model API), Genie and the Knowledge Assistant all run inside the Databricks platform under the workspace\'s permissions.'],
+          ['How does it know which schema a document is?', 'By its fingerprint: the document title plus its section headings, compared with each recorded schema version.'],
+          ['What if the AI is wrong?', 'It cannot supply a value or approve anything. A wrong proposed mapping is caught by the person confirming it; if confirmed wrongly, a corrected version is recorded and the affected contracts are re-read.'],
+          ['Where is the code?', 'In a public repository: the reading and rules in jobs/, the app in app/, the reset and earlier-contract loader in tools/. Full Q&A: docs/MRC_DEMO_QA.md.']];
+        const faqT = `<div class="card"><h2 style="margin-top:0">Questions about the architecture</h2>${faq.map(f => `<div style="margin:10px 0"><div style="font-weight:700">${escapeHtml(f[0])}</div><div style="font-size:13px;color:var(--slate2)">${escapeHtml(f[1])}</div></div>`).join('')}</div>`;
+        return tabs + `<details class="details-summary" open><summary>What am I seeing?</summary>
+            <div class="body">How the MRC flow is built, for anyone presenting it: the one-minute answer, the architecture, what each button does, what runs where, what the AI does and does not do, and links to every live object.</div></details>`
+          + minute + diagram + pressT + runs + ai + assets + faqT;
       },
 
       'mrc_certainty': async function() {
