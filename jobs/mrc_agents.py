@@ -50,15 +50,20 @@ def intake_facts(cfg):
     F = cfg["full_schema"]
     docs = sql(f"""SELECT d.file_name, d.inbound_state, d.template_version, d.counterparty,
                           get_json_object(d.reconciliation_detail, '$.schema')
-                   FROM {F}.source_document d WHERE d.tenant='mrc' ORDER BY d.file_name""", cfg=cfg)
+                   FROM {F}.source_document d WHERE d.tenant='mrc' AND d.stored_path LIKE '%/mrc_inbox/%'
+                   ORDER BY d.file_name""", cfg=cfg)
     entities = sql(f"""SELECT umr, insured_name, class_of_business, broker_name, premium_currency, premium_amount,
                               signed_lines_total, schema_name, schema_version, certainty_status
-                       FROM {F}.v_mrc_entities_latest ORDER BY umr""", cfg=cfg)
+                       FROM {F}.v_mrc_entities_latest WHERE source_document_id IN (SELECT doc_id FROM {F}.source_document WHERE tenant='mrc' AND stored_path LIKE '%/mrc_inbox/%')
+                       ORDER BY umr""", cfg=cfg)
     fails = sql(f"""SELECT e.umr, e.insured_name, c.label, c.detail FROM {F}.v_mrc_certainty_latest c
-                    JOIN {F}.v_mrc_entities_latest e ON c.mrc_id = e.mrc_id WHERE c.status='fail' ORDER BY e.umr""", cfg=cfg)
+                    JOIN {F}.v_mrc_entities_latest e ON c.mrc_id = e.mrc_id WHERE c.status='fail'
+                    AND e.source_document_id IN (SELECT doc_id FROM {F}.source_document WHERE tenant='mrc' AND stored_path LIKE '%/mrc_inbox/%') ORDER BY e.umr""", cfg=cfg)
     gaps = sql(f"""SELECT e.umr, x.label FROM {F}.v_mrc_extraction_latest x JOIN {F}.v_mrc_entities_latest e
-                   ON x.mrc_id = e.mrc_id WHERE x.status <> 'identified' ORDER BY e.umr""", cfg=cfg)
-    auto = sql(f"""SELECT count(*) FROM {F}.audit_event WHERE event_type='auto_ingested'""", cfg=cfg)[0][0]
+                   ON x.mrc_id = e.mrc_id WHERE x.status <> 'identified'
+                   AND e.source_document_id IN (SELECT doc_id FROM {F}.source_document WHERE tenant='mrc' AND stored_path LIKE '%/mrc_inbox/%') ORDER BY e.umr""", cfg=cfg)
+    auto = sql(f"""SELECT count(*) FROM {F}.audit_event WHERE event_type='auto_ingested'
+                   AND entity_id IN (SELECT doc_id FROM {F}.source_document WHERE tenant='mrc' AND stored_path LIKE '%/mrc_inbox/%')""", cfg=cfg)[0][0]
     states = [s for _, s, *_ in docs]
     by_ccy = {}
     for r in entities:

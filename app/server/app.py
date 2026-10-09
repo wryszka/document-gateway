@@ -12,7 +12,7 @@ import json
 import os
 import sys
 
-from fastapi import FastAPI, Body, HTTPException
+from fastapi import FastAPI, Body, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse, Response
 from starlette.middleware.base import BaseHTTPMiddleware
 
@@ -468,26 +468,126 @@ def mrc_contract(mrc_id: str):
             "pdf": f"/api/mrc/pdf/{h['doc_id']}"}
 
 
+def _who(request: Request, body: dict | None = None) -> str:
+    """The person acting: the signed-in user forwarded by Databricks Apps, so every
+    approval in the record names a real identity. Falls back for local runs."""
+    h = request.headers
+    return (h.get("x-forwarded-email") or h.get("x-forwarded-preferred-username")
+            or (body or {}).get("actor") or "reviewer")
+
+
 @app.post("/api/mrc/agent/intake_review")
-def mrc_agent_intake(body: dict = Body(default={}), mode: str = "live"):
+def mrc_agent_intake(request: Request, body: dict = Body(default={}), mode: str = "live"):
     """Intake review agent: reads the computed intake facts and advises. Logged; never acts."""
     try:
-        return ma.intake_review(CFG, actor=body.get("actor", "presenter"), cache=_AI_CACHE if mode == "cached" else None)
+        return ma.intake_review(CFG, actor=_who(request, body), cache=_AI_CACHE if mode == "cached" else None)
     except Exception as e:
         raise HTTPException(500, f"Agent unavailable: {e}")
 
 
 @app.post("/api/mrc/agent/schema_review")
-def mrc_agent_schema(body: dict = Body(...), mode: str = "live"):
+def mrc_agent_schema(request: Request, body: dict = Body(...), mode: str = "live"):
     """Schema review agent: critiques a proposed schema or amendment before a person records it."""
     kind = body.get("kind")
     if kind not in ("recognition", "changes"):
         raise HTTPException(400, "kind must be recognition or changes")
     try:
-        return ma.schema_review(CFG, kind, body.get("payload") or {}, actor=body.get("actor", "presenter"),
+        return ma.schema_review(CFG, kind, body.get("payload") or {}, actor=_who(request, body),
                                 cache=_AI_CACHE if mode == "cached" else None)
     except Exception as e:
         raise HTTPException(500, f"Agent unavailable: {e}")
+
+
+def _grant_summary(grants):
+    """Who has access, without listing individual people's addresses on a presented screen:
+    groups and service principals by name, named users as a count."""
+    people = {g["principal"] for g in grants if "@" in g["principal"]}
+    sp = os.environ.get("DATABRICKS_CLIENT_ID", "")
+    privs: dict = {}
+    for g in grants:
+        if "@" not in g["principal"]:
+            privs.setdefault(g["principal"], set()).add(g["privilege"].lower().replace("_", " "))
+    other = [f"{'this app (its own service principal)' if pr == sp else pr}: {', '.join(sorted(v))}"
+             for pr, v in sorted(privs.items())]
+    parts = ([f"{len(people)} named user(s), each granted individually"] if people else []) + other
+    return "; ".join(parts) or "no grants beyond the owner"
+
+
+@app.get("/api/mrc/dashboard")
+def mrc_dashboard():
+    """What is in the book: every loaded contract (earlier ones and today's), by month, class,
+    broker, lead syndicate, currency and certainty. Premium is always kept per currency."""
+    E = f"{F}.v_mrc_entities_latest"
+    base = f"""SELECT e.*, d.ingested_at, d.stored_path LIKE '%/mrc_inbox/%' AS today,
+                      a.entity_id IS NOT NULL AS auto
+               FROM {E} e JOIN {F}.source_document d ON e.source_document_id = d.doc_id
+               LEFT JOIN (SELECT DISTINCT entity_id FROM {F}.audit_event WHERE event_type='auto_ingested') a
+                 ON a.entity_id = d.doc_id"""
+    k = q(f"""SELECT count(*), sum(CASE WHEN auto THEN 1 ELSE 0 END), sum(CASE WHEN certainty_status='pass' THEN 1 ELSE 0 END),
+                     sum(CASE WHEN today THEN 1 ELSE 0 END), count(DISTINCT broker_name),
+                     count(DISTINCT regexp_extract(slip_leader, 'Syndicate ([0-9]+)', 1))
+              FROM ({base})""")[0]
+    by_month = rows_as_dicts(f"""SELECT date_format(ingested_at, 'yyyy-MM') AS month, count(*) AS n,
+                                        sum(CASE WHEN auto THEN 1 ELSE 0 END) AS auto
+                                 FROM ({base}) GROUP BY 1 ORDER BY 1""", ["month", "n", "auto"])
+    by_class = rows_as_dicts(f"""SELECT class_of_business, count(*) AS n FROM ({base}) GROUP BY 1 ORDER BY 2 DESC, 1""",
+                             ["class_of_business", "n"])
+    by_broker = rows_as_dicts(f"""SELECT broker_name, count(*) AS n FROM ({base}) GROUP BY 1 ORDER BY 2 DESC, 1""",
+                              ["broker_name", "n"])
+    by_leader = rows_as_dicts(f"""SELECT slip_leader, count(*) AS n FROM ({base}) GROUP BY 1 ORDER BY 2 DESC, 1 LIMIT 8""",
+                              ["slip_leader", "n"])
+    by_ccy = rows_as_dicts(f"""SELECT premium_currency AS currency, count(*) AS n, round(sum(premium_amount), 0) AS premium
+                               FROM ({base}) WHERE premium_currency IS NOT NULL GROUP BY 1 ORDER BY 3 DESC""",
+                           ["currency", "n", "premium"])
+    fails = rows_as_dicts(f"""SELECT c.label, count(*) AS n FROM {F}.v_mrc_certainty_latest c WHERE c.status='fail'
+                              GROUP BY 1 ORDER BY 2 DESC""", ["label", "n"])
+    return {"kpis": {"contracts": int(k[0] or 0), "auto": int(k[1] or 0), "pass": int(k[2] or 0),
+                     "today": int(k[3] or 0), "brokers": int(k[4] or 0), "leaders": int(k[5] or 0)},
+            "by_month": by_month, "by_class": by_class, "by_broker": by_broker, "by_leader": by_leader,
+            "by_currency": by_ccy, "failed_rules": fails}
+
+
+@app.get("/api/mrc/custody")
+def mrc_custody(mrc_id: str | None = None):
+    """One contract's governance record, end to end: when it arrived, which schema version read
+    it and who recorded that version (and every earlier one), who decided anything about it,
+    what was checked, what the agents said, and who can see it."""
+    contracts = rows_as_dicts(
+        f"""SELECT e.mrc_id, e.umr, e.insured_name, e.class_of_business, e.schema_name, e.schema_version,
+                   d.stored_path LIKE '%/mrc_inbox/%' AS today
+            FROM {F}.v_mrc_entities_latest e JOIN {F}.source_document d ON e.source_document_id = d.doc_id
+            ORDER BY today DESC, e.schema_version DESC, e.umr""",
+        ["mrc_id", "umr", "insured_name", "class_of_business", "schema_name", "schema_version", "today"])
+    if not contracts:
+        return {"contracts": [], "custody": None}
+    m = mrc_id or contracts[0]["mrc_id"]
+    c = mrc_contract(m)
+    h = c["contract"]
+    versions = rows_as_dicts(
+        f"""SELECT t.template_version AS version, t.created_by, t.created_at, t.field_count, n.description, n.change_note
+            FROM {F}.template t LEFT JOIN {F}.mrc_schema_note n
+              ON n.schema_name = t.counterparty AND n.schema_version = t.template_version
+            WHERE t.doc_family='mrc' AND t.counterparty=:s ORDER BY t.created_at""",
+        ["version", "created_by", "created_at", "field_count", "description", "change_note"], {"s": h["schema_name"]})
+    decisions = rows_as_dicts(
+        f"""SELECT created_at, decision_type, actor, reason FROM {F}.decision
+            WHERE tenant='mrc' AND source_document_id=:d ORDER BY created_at""",
+        ["created_at", "decision_type", "actor", "reason"], {"d": h["doc_id"]})
+    agents = rows_as_dicts(
+        f"""SELECT created_at, agent, subject, requested_by FROM {F}.mrc_agent_note
+            WHERE subject LIKE concat('%', :f) OR subject = 'MRC intake' ORDER BY created_at""",
+        ["created_at", "agent", "subject", "requested_by"], {"f": h["file_name"]})
+    auto = any(e["event_type"] == "auto_ingested" for e in c["history"])
+    grants = []
+    try:
+        grants = [{"principal": r[0], "privilege": r[1]} for r in q(f"SHOW GRANTS ON SCHEMA {F}")]
+    except Exception:
+        pass
+    return {"contracts": contracts, "custody": {
+        "contract": h, "checks": c["checks"], "history": c["history"], "pdf": c["pdf"],
+        "schema_versions": versions, "decisions": decisions, "agents": agents, "auto": auto,
+        "values": len(c["values"]), "traced": sum(1 for v in c["values"] if v.get("source_quote")),
+        "grants": _grant_summary(grants), "volume": CFG["volume_path"]}}
 
 
 @app.get("/api/mrc/governance")
@@ -534,7 +634,7 @@ def mrc_governance():
          "a": f"{len(decisions)} human decisions are recorded (schema confirmations, accepted changes, returns, corrections), each with who, when and the reason.",
          "evidence": [f"{str(d['created_at'])[:16].replace('T', ' ')} · {d['decision_type']} · {d['actor']} · {d['file_name'] or ''} — {d['reason'] or ''}" for d in decisions]},
         {"q": "What did the AI do — and did it decide anything?",
-         "a": "No. The model only proposed ACORD mappings for an unfamiliar schema and builds the wider entity graph; a person "
+         "a": "The model only proposed ACORD mappings for an unfamiliar schema and builds the wider entity graph; a person "
               "confirmed every schema. The review agents advise — they cannot record a schema or load a contract. "
               f"{len(agents)} agent reviews are logged with the facts they were given.",
          "evidence": [f"{str(a['created_at'])[:16].replace('T', ' ')} · {a['agent']} · {a['subject']} · asked by {a['requested_by']}" for a in agents]},
@@ -545,11 +645,11 @@ def mrc_governance():
          "a": "Every value is stored with the MRC section and the exact source line it was read from, and the original PDF is "
               "kept in a governed volume. Open any contract → Values & lineage.", "evidence": []},
         {"q": "Can a schema be changed without anyone knowing?",
-         "a": "No. Schema versions are append-only: a change records a new version with who, when and why; earlier versions stay readable.",
+         "a": "Schema versions are append-only: a change records a new version with who, when and why; earlier versions stay readable.",
          "evidence": [who(v) for v in versions if v["version"] != "v1"]},
         {"q": "Who can see and change this data?",
-         "a": "Access is governed in Unity Catalog. Current grants on the schema:",
-         "evidence": [f"{g['principal']} — {g['privilege']}" for g in grants[:20]]},
+         "a": f"Access is governed in Unity Catalog: {_grant_summary(grants)}.",
+         "evidence": []},
     ]
     return {"questions": questions, "versions": versions, "decisions": decisions, "agents": agents}
 
@@ -592,7 +692,7 @@ def mrc_metrics():
 
 
 @app.post("/api/mrc/update")
-def mrc_update(body: dict = Body(...)):
+def mrc_update(request: Request, body: dict = Body(...)):
     """Governed in-place correction of an extracted MRC metric. Allowlisted field,
     parameter-bound; writes an audit event + an append-only decision so it is traceable.
     (Corrects the projection; a full build would also revise the graph assertion + provenance.)"""
@@ -606,7 +706,7 @@ def mrc_update(body: dict = Body(...)):
     old_val, sdoc = prior[0][0], prior[0][1]
     set_expr = f"{field}=cast(:v as decimal(18,2))" if kind == "dec" else f"{field}=:v"
     q(f"UPDATE {F}.mrc_entities SET {set_expr} WHERE mrc_id=:m", {"v": value, "m": mrc_id})
-    actor = body.get("actor", "reviewer")
+    actor = _who(request, body)
     pipe.audit(CFG, "metric_corrected", "mrc_entities", mrc_id,
                detail=f"{field}: '{old_val}' -> '{value}'", actor=actor)
     tl.decision(CFG, "metric_correction", sdoc, "mrc-v1",
@@ -621,7 +721,7 @@ def mrc_inbox():
     docs = rows_as_dicts(
         f"""SELECT doc_id,file_name,counterparty,status,inbound_state,reporting_period,ingested_at,template_version,
                    get_json_object(reconciliation_detail, '$.schema') AS flagged_schema
-            FROM {F}.source_document WHERE tenant='mrc' ORDER BY file_name""",
+            FROM {F}.source_document WHERE tenant='mrc' AND stored_path LIKE '%/mrc_inbox/%' ORDER BY file_name""",
         ["doc_id", "file_name", "counterparty", "status", "inbound_state", "reporting_period", "ingested_at",
          "template_version", "flagged_schema"])
     counts = {}
@@ -695,7 +795,7 @@ def mrc_propose(doc_id: str = ""):
 
 
 @app.post("/api/mrc/confirm")
-def mrc_confirm(body: dict = Body(...)):
+def mrc_confirm(request: Request, body: dict = Body(...)):
     """A person confirmed a proposed schema: record it (v1) and ingest the document."""
     doc_id, name, fields = body.get("doc_id"), (body.get("name") or "").strip(), body.get("fields") or []
     if not doc_id or not name:
@@ -705,7 +805,7 @@ def mrc_confirm(body: dict = Body(...)):
         raise HTTPException(400, "This document is not waiting for schema recognition")
     if not any(f.get("include") and f.get("binding") for f in fields):
         raise HTTPException(400, "Select at least one field")
-    actor, description = body.get("actor", "reviewer"), body.get("description")
+    actor, description = _who(request, body), body.get("description")
     return _start_job("recognise", lambda: ms.confirm_new_schema(CFG, doc_id, name, fields, actor=actor,
                                                                    description=description))
 
@@ -720,13 +820,13 @@ def mrc_changes(doc_id: str):
 
 
 @app.post("/api/mrc/accept_changes")
-def mrc_accept_changes(body: dict = Body(...)):
+def mrc_accept_changes(request: Request, body: dict = Body(...)):
     """Accept a changed layout: record the next schema version (learned labels) and ingest."""
     doc_id = body.get("doc_id")
     st = q(f"SELECT inbound_state FROM {F}.source_document WHERE tenant='mrc' AND doc_id=:d", {"d": doc_id})
     if not st or st[0][0] != "schema_changed":
         raise HTTPException(400, "This document is not flagged as a changed layout")
-    actor, decisions, note = body.get("actor", "reviewer"), body.get("decisions") or {}, body.get("change_note")
+    actor, decisions, note = _who(request, body), body.get("decisions") or {}, body.get("change_note")
     for k, dsc in decisions.items():  # validate the person's choices before starting
         if dsc.get("action") not in ("rename", "map", "gap"):
             raise HTTPException(400, f"unknown decision for {k}")
@@ -739,7 +839,8 @@ def mrc_accept_changes(body: dict = Body(...)):
 @app.get("/api/mrc/progress")
 def mrc_progress():
     states = {r[0]: int(r[1]) for r in q(
-        f"SELECT inbound_state, count(*) FROM {F}.source_document WHERE tenant='mrc' GROUP BY inbound_state")}
+        f"""SELECT inbound_state, count(*) FROM {F}.source_document WHERE tenant='mrc'
+            AND stored_path LIKE '%/mrc_inbox/%' GROUP BY inbound_state""")}
     return {"running": _MRC_JOB["running"], "kind": _MRC_JOB["kind"], "result": _MRC_JOB["result"],
             "error": _MRC_JOB["error"], "states": states}
 
@@ -754,11 +855,11 @@ def mrc_reset_demo(body: dict = Body(default={})):
 
 
 @app.post("/api/mrc/review")
-def mrc_review(body: dict = Body(...)):
+def mrc_review(request: Request, body: dict = Body(...)):
     """HITL decision on a document that did not match the MRC schema (reject / return to broker)."""
     try:
         return mrc.review_unrecognised(CFG, body["doc_id"], body.get("action", "reject"),
-                                       reason=body.get("reason", ""), actor=body.get("actor", "reviewer"))
+                                       reason=body.get("reason", ""), actor=_who(request, body))
     except ValueError as e:
         raise HTTPException(400, str(e))
 

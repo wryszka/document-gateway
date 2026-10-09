@@ -332,7 +332,7 @@ def register_schema(cfg, actor="reviewer", from_doc=None):
 
 
 # ---------------------------------------------------------------- ingest (rule 5: recognised -> analytics)
-def ingest(cfg, doc_id, actor="mrc-pipeline", rec=None, schema=None):
+def ingest(cfg, doc_id, actor="mrc-pipeline", rec=None, schema=None, ai=True):
     """Extract a recognised MRC into the graph + projections; mark it recognised/active.
     `rec` (from recognise()) is reused so the PDF is parsed once."""
     F = cfg["full_schema"]
@@ -344,7 +344,7 @@ def ingest(cfg, doc_id, actor="mrc-pipeline", rec=None, schema=None):
     ds = doc_id.split("-")[-1][:8]
     rec = rec or recognise(cfg, path)
     text, d = rec["text"], rec["det"]
-    ai = ai_graph(cfg, text)
+    ai = ai_graph(cfg, text) if ai else {"nodes": [], "edges": []}  # ai=False: values by rule only
 
     pol, ins, brk, plc = f"policy_{ds}", f"insured_{ds}", f"broker_{ds}", f"placement_{ds}"
     nodes = [

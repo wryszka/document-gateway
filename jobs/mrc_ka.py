@@ -48,6 +48,12 @@ def main():
                 display_name="MRC PDFs", description="MRC v3 PDFs from the mrc_inbox volume",
                 source_type="FILES", files=FilesSpec(path=vol)))
         print("added FILES source")
+    if not any(s.display_name == "MRC archive PDFs" for s in srcs):  # contracts loaded before today
+        w.knowledge_assistants.create_knowledge_source(
+            parent=ka.name, knowledge_source=KnowledgeSource(
+                display_name="MRC archive PDFs", description="Earlier MRC v3 PDFs from the mrc_archive volume",
+                source_type="FILES", files=FilesSpec(path=f'{cfg["volume_path"]}/mrc_archive')))
+        print("added archive FILES source")
     w.knowledge_assistants.sync_knowledge_sources(name=ka.name)
     print("sync triggered; waiting for ACTIVE (up to 10 min)...")
 

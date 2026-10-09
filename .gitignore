@@ -21,3 +21,4 @@ data/generated/
 
 # OS
 .DS_Store
+data/generated_mrc/mrc_archive/

@@ -147,7 +147,7 @@ def open_market_field_map(cfg):
     return fm
 
 
-def preregister_open_market(cfg, actor="Market data team"):
+def preregister_open_market(cfg, actor="Priya Natarajan (Market Data Standards)"):
     """The schema the demo starts with — recorded before the documents arrive."""
     fp = {"title": TITLE, "sections": sorted(["RISK DETAILS", "INFORMATION", "SECURITY DETAILS",
                                               "SUBSCRIPTION AGREEMENT", "FISCAL AND REGULATORY",
@@ -156,7 +156,7 @@ def preregister_open_market(cfg, actor="Market data team"):
                    "schema_confirm", "Open-market MRC v3 schema recorded in the repository",
                    description="Lloyd's open-market Market Reform Contract (MRC v3): one risk placed with a panel "
                                "of syndicates. The standard placement document of the subscription market.",
-                   change_note="Initial version, recorded by the market data team.")
+                   change_note="Initial version, recorded by Market Data Standards.")
 
 
 # ------------------------------------------------------------------ extraction against a schema
@@ -311,16 +311,16 @@ def _set_state(cfg, doc_id, status, state, detail=None, version=None):
                 "v": version, "d": doc_id}, cfg=cfg)
 
 
-def _ingest(cfg, doc_id, cls, actor):
+def _ingest(cfg, doc_id, cls, actor, ai=True):
     rec = {"text": cls["text"], "det": cls["d"], "points": cls["points"]}
-    return mp.ingest(cfg, doc_id, actor=actor, rec=rec, schema=cls["schema"])
+    return mp.ingest(cfg, doc_id, actor=actor, rec=rec, schema=cls["schema"], ai=ai)
 
 
-def process_one(cfg, doc_id, path, actor="intake"):
+def process_one(cfg, doc_id, path, actor="intake", ai=True):
     cls = classify(cfg, path)
     o = cls["outcome"]
     if o == "known":
-        _ingest(cfg, doc_id, cls, actor)
+        _ingest(cfg, doc_id, cls, actor, ai)
         audit(cfg, "auto_ingested", "source_document", doc_id,
               detail=f"matched {cls['schema']['name']} {cls['schema']['version']} — no person involved", actor=actor)
     elif o == "changed":
@@ -347,7 +347,8 @@ def intake(cfg, actor="intake"):
     import time
     F = cfg["full_schema"]
     rows = sql(f"""SELECT doc_id, stored_path FROM {F}.source_document
-                   WHERE tenant='mrc' AND status IN ('received','processing') ORDER BY file_name""", cfg=cfg)
+                   WHERE tenant='mrc' AND status IN ('received','processing') AND stored_path LIKE '%/mrc_inbox/%'
+                   ORDER BY file_name""", cfg=cfg)
     for doc_id, _ in rows:
         _set_state(cfg, doc_id, "processing", "processing")
 
