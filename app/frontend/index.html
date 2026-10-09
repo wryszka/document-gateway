@@ -91,6 +91,25 @@
     .arch-key .k3:before{background:#fffbeb;border-color:#fcd34d}.arch-key .k4:before{background:#f0fdf4;border-color:#86efac}
     .arch-key .k5:before{background:#f8fafc;border-color:#cbd5e1;border-style:dashed}
     @media(max-width:1100px){.arch{grid-template-columns:1fr}.arch .ar{transform:rotate(90deg);height:24px}}
+    .gov-ask{padding:14px 16px;border-left:4px solid #7c3aed}
+    .gov-ask .chipq{font-size:12px}
+    .gov-answer{margin-top:12px;padding:12px 14px;border-radius:10px;background:#faf5ff;border:1px solid #e9d5ff;font-size:13.5px}
+    .gov-tabs{display:flex;gap:4px;border-bottom:1px solid var(--line);margin:4px 0 14px;flex-wrap:wrap}
+    .gov-tabs a{padding:9px 16px;border-radius:9px 9px 0 0;text-decoration:none;font-weight:600;color:var(--mut);font-size:13.5px}
+    .gov-tabs a.on{background:var(--card);color:var(--ink);border:1px solid var(--line);border-bottom-color:var(--card);margin-bottom:-1px}
+    .gov-two{display:grid;grid-template-columns:1.7fr 1fr;gap:18px;align-items:start}
+    .gov-pick{padding:8px 10px;border:1px solid var(--line2);border-radius:8px;min-width:340px;font:13px system-ui}
+    .gov-glance{margin:0;background:#f8fafc}
+    .gov-glance .h{font-size:11px;font-weight:800;letter-spacing:.07em;text-transform:uppercase;color:var(--mut);margin-bottom:8px}
+    .gov-glance .row{display:flex;justify-content:space-between;gap:10px;padding:7px 0;border-bottom:1px solid var(--line);font-size:13px}
+    .gov-glance .row span{color:var(--mut)}
+    .gov-glance .row b{text-align:right}
+    .gov-glance .links{display:flex;flex-direction:column;gap:6px;margin-top:12px;font-size:13px}
+    .gov-list{margin:0 0 10px 18px;line-height:1.7;font-size:13.5px}
+    .custody .a{font-size:14px}
+    .custody .st{margin-bottom:14px}
+    .chipq.on{background:#3b82f6;color:#fff;border-color:#3b82f6}
+    @media(max-width:1100px){.gov-two{grid-template-columns:1fr}}
     @media(max-width:820px){
       .main{padding:16px 20px}
       .tiles{grid-template-columns:1fr}
@@ -931,87 +950,164 @@
 
       'mrc_governance': async function() {
         const qs = new URLSearchParams((window.location.hash.split('?')[1]) || '');
-        const [cu, g] = await Promise.all([
+        const tab = qs.get('t') || 'contract';
+        const [cu, g, S] = await Promise.all([
           fetchJSON('/api/mrc/custody' + (qs.get('m') ? '?mrc_id=' + encodeURIComponent(qs.get('m')) : '')),
-          fetchJSON('/api/mrc/governance')]);
-        const when = t => escapeHtml(String(t || '').slice(0, 16).replace('T', ' '));
-        const day = t => { const d = new Date(String(t || '').replace(' ', 'T')); return isNaN(d) ? when(t) : escapeHtml(d.toLocaleDateString('en-GB', {day: 'numeric', month: 'long', year: 'numeric'})); };
-        const explain = `<details class="details-summary" open><summary>What am I seeing?</summary>
-            <div class="body">The answers to the governance questions you will be asked — first for one contract, end to end, then for the whole book. Every line is read from the records the system keeps (schema versions, decisions, checks, audit), not written for the slide. Choose any contract.</div></details>`;
-        if (!cu.custody) return explain + `<div class="card">No contracts loaded yet — <a href="#mrc_inbox">Run intake</a> first.</div>`;
-        const k = cu.custody, c = k.contract;
-        const vers = k.schema_versions, read = vers.find(v => v.version === c.schema_version) || {}, orig = vers[0] || {};
-        const fails = k.checks.filter(x => x.status === 'fail');
-        const people = k.decisions.filter(d => d.decision_type !== 'metric_correction');
-        const fixes = k.decisions.filter(d => d.decision_type === 'metric_correction');
-        const agents = k.agents.filter(a => a.subject !== 'MRC intake');
-        const picker = `<select id="govPick" aria-label="Choose a contract" style="padding:8px 10px;border:1px solid var(--line2);border-radius:8px;min-width:420px;font:13px system-ui">
-            <optgroup label="Today's intake">${cu.contracts.filter(x => x.today).map(x => `<option value="${escapeAttr(x.mrc_id)}" ${x.mrc_id === c.mrc_id ? 'selected' : ''}>${escapeHtml(x.umr + ' · ' + x.insured_name + ' · ' + x.class_of_business)}</option>`).join('')}</optgroup>
-            <optgroup label="Loaded earlier">${cu.contracts.filter(x => !x.today).map(x => `<option value="${escapeAttr(x.mrc_id)}" ${x.mrc_id === c.mrc_id ? 'selected' : ''}>${escapeHtml(x.umr + ' · ' + x.insured_name + ' · ' + x.class_of_business)}</option>`).join('')}</optgroup></select>`;
-        const st = (h, a, e, warn) => `<div class="st ${warn ? 'warn' : ''}"><div class="h">${h}</div><div class="a">${a}</div>${e ? `<div class="e">${e}</div>` : ''}</div>`;
-        const custody = `<div class="card">
-            <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:14px">
-              <div><div style="font-size:11px;color:var(--mut);text-transform:uppercase;letter-spacing:.07em;font-weight:800">One contract, end to end</div>
-                <div style="font-size:18px;font-weight:800;color:var(--ink)">${escapeHtml(c.insured_name)} <span style="color:var(--mut);font-weight:600">· ${escapeHtml(c.umr)}</span></div></div>
-              ${picker}</div>
-            <div class="custody">
-              ${st('Received', `Arrived on ${day(c.ingested_at)} as <b>${escapeHtml(c.file_name)}</b>.`, `The original PDF is kept unchanged in a governed Unity Catalog volume. <a href="${escapeAttr(k.pdf)}" target="_blank" rel="noopener">Open it ↗</a>`)}
-              ${st('Read with', `<b>${escapeHtml(c.schema_name)} ${escapeHtml(c.schema_version)}</b> — recorded by <b>${escapeHtml(read.created_by || '—')}</b> on ${day(read.created_at)}.`,
-                   read.change_note ? '“' + escapeHtml(read.change_note) + '”' : '')}
-              ${vers.length > 1 || orig.version !== c.schema_version ? st('Schema history', vers.map(v => `<div style="margin:3px 0"><span class="chip plain">${escapeHtml(v.version)}</span> ${v === orig ? 'Original schema, approved' : 'Change recorded'} by <b>${escapeHtml(v.created_by)}</b> on ${day(v.created_at)}${v.change_note && v !== orig ? ' — “' + escapeHtml(v.change_note) + '”' : ''}</div>`).join(''),
-                   'Versions are append-only: a change adds a version with who, when and why; earlier versions stay readable.') : st('Schema history', `Original schema approved by <b>${escapeHtml(orig.created_by)}</b> on ${day(orig.created_at)}; no changes since.`, escapeHtml(orig.description || ''))}
-              ${st('Loaded', k.auto ? 'Loaded automatically — it matched every expected field of a recorded schema. <b>No person was involved</b>, by design.'
-                   : (people.length ? people.map(d => `${escapeHtml(({schema_change_accept: 'Layout change accepted', schema_confirm: 'New schema confirmed and loaded', reject: 'Rejected', return_to_broker: 'Returned to the broker'})[d.decision_type] || d.decision_type.replace(/_/g, ' '))} by <b>${escapeHtml(d.actor)}</b> on ${day(d.created_at)}`).join('<br>') : 'Not loaded automatically.'),
-                   k.auto ? '' : people.map(d => escapeHtml(d.reason || '')).filter(Boolean).join(' · '))}
-              ${st('Values', `<b>${k.traced} of ${k.values}</b> values carry the exact line in the contract they were read from.`,
-                   `Read by rule from the MRC sections — no model supplied a value. <a href="#mrc_contract?m=${encodeURIComponent(c.mrc_id)}">See every value and its line →</a>`)}
-              ${st('Market rules', fails.length ? `<b>${k.checks.length - fails.length} of ${k.checks.length}</b> rules pass — fails: ${fails.map(f => escapeHtml(f.label)).join(', ')}.` : `<b>All ${k.checks.length}</b> contract-certainty rules pass.`,
-                   fails.map(f => escapeHtml(f.detail)).join(' · '), fails.length > 0)}
-              ${fixes.length ? st('Corrections', fixes.map(d => `${escapeHtml(d.reason || 'correction')} — <b>${escapeHtml(d.actor)}</b>, ${day(d.created_at)}`).join('<br>'), 'Corrections are new records; the original value stays in the history.') : ''}
-              ${st('AI involvement', agents.length ? `${agents.length} agent review(s) — advice only: ` + agents.map(a => `${escapeHtml(a.agent.replace('_', ' '))} asked by <b>${escapeHtml(a.requested_by)}</b>, ${day(a.created_at)}`).join('; ')
-                   : 'No model decided anything on this contract.', 'Agents can advise; they cannot record a schema or load a contract.')}
-              ${st('Who can see it', 'Access is governed in Unity Catalog — the same grants for the app, a notebook or Genie.',
-                   escapeHtml(k.grants))}
-            </div>
-            <div style="font-size:12px;color:var(--mut)">Every event for this contract: <a href="#mrc_contract?m=${encodeURIComponent(c.mrc_id)}">contract → History</a> · the whole trail: <a href="#mrc_audit">Audit →</a></div>
+          fetchJSON('/api/mrc/governance'), fetchJSON('/api/mrc/standard')]);
+        const day = t => { const d = new Date(String(t || '').replace(' ', 'T')); return isNaN(d) ? escapeHtml(t || '—') : escapeHtml(d.toLocaleDateString('en-GB', {day: 'numeric', month: 'short', year: 'numeric'})); };
+        const when = t => { const d = new Date(String(t || '').replace(' ', 'T')); return isNaN(d) ? escapeHtml(t || '') : escapeHtml(d.toLocaleDateString('en-GB', {day: 'numeric', month: 'short', year: 'numeric'}) + ' ' + d.toTimeString().slice(0, 5)); };
+        const DEC = {schema_confirm: 'Schema recorded', schema_change_accept: 'Layout change accepted', metric_correction: 'Value corrected',
+                     reject: 'Rejected', return_to_broker: 'Returned to broker', hitl_reject: 'Rejected', hitl_return: 'Returned to broker'};
+        const dec = t => DEC[t] || String(t || '').replace(/_/g, ' ');
+        const Sm = g.summary || {}, lv = Sm.latest_version || {};
+        const href = (t, extra) => '#mrc_governance?t=' + t + (extra || '');
+        // ---- headline answers
+        const kpi = (v, l, s2, t) => `<a class="kpi" href="${href(t)}" style="text-decoration:none;display:block"><div class="v">${v}</div><div class="l">${l}</div><div class="s">${s2}</div></a>`;
+        const kpis = `<div class="kpi-grid">
+            ${kpi(Sm.versions, 'Schema versions on record', lv.created_by ? 'latest by ' + escapeHtml(lv.created_by) + ', ' + day(lv.created_at) : '', 'approvals')}
+            ${kpi(Sm.auto + ' / ' + Sm.contracts, 'Loaded with no person', 'matched a recorded schema in full', 'contract')}
+            ${kpi(Sm.decisions, 'Human decisions', 'each with who, when and why', 'decisions')}
+            ${kpi(Sm.failing, 'Contracts failing a market rule', 'open them from Contracts', 'contract')}
+            ${kpi('0', 'Decisions made by AI', Sm.agents + ' advisory review(s) logged', 'ai')}
           </div>`;
-        const answers = g.questions.map(x => `<div class="card ans"><div class="a">${escapeHtml(x.a)}</div>
-            ${x.evidence.length ? `<details style="margin-top:6px"><summary style="cursor:pointer;font-size:12px;color:var(--brand)">Show the ${x.evidence.length} record(s)</summary>
-              <ul style="margin:6px 0 0 18px;font-size:12px;color:var(--slate2)">${x.evidence.slice(0, 60).map(e => `<li>${escapeHtml(e)}</li>`).join('')}</ul></details>` : ''}</div>`).join('');
+        // ---- governance agent, compact
         const gex = ['Who approved the schema the Ashgrove contract was read with, and when?',
-                     'What changes have been made to the open-market schema — by whom, and why?',
-                     'Which contracts were loaded with no person involved, and which needed a decision?',
-                     'Did the AI decide anything on any contract?',
-                     'Who corrected values in the book, and when?',
-                     'Show the full history of the NovaTech contract.',
-                     'Who can access this data?'];
-        const govAgent = `<div class="card" style="border-left:4px solid #7c3aed">
-            <div style="font-weight:700;margin-bottom:2px">🤖 Governance agent — ask who did what</div>
-            <div style="font-size:12px;color:var(--mut);margin-bottom:10px">Answers only from the governance records (schema versions, decisions, each contract's route and checks, corrections, agent reviews, access), names the people and dates, and says so when the records do not hold the answer. Every question asked is logged.</div>
-            <div style="display:flex;gap:10px"><input type="text" id="govAskInput" aria-label="Ask a governance question" placeholder="e.g. Who approved the schema used for this contract?" style="flex:1;padding:9px;border:1px solid var(--line2);border-radius:8px">
+                     'What changes have been made to the open-market schema, by whom and why?',
+                     'Which contracts needed a decision by a person?', 'Did the AI decide anything on any contract?',
+                     'Who corrected values in the book, and when?', 'Show the full history of the NovaTech contract.', 'Who can access this data?'];
+        const agent = `<div class="card gov-ask">
+            <div style="display:flex;gap:10px;align-items:center">
+              <span style="font-size:20px">🤖</span>
+              <input type="text" id="govAskInput" aria-label="Ask a governance question" placeholder="Ask the governance agent — e.g. who approved the schema used for this contract?" style="flex:1;padding:10px 12px;border:1px solid var(--line2);border-radius:10px;font-size:14px">
               <button class="act" id="govAskBtn">Ask</button></div>
-            <div style="margin-top:8px">${gex.map(e => `<button class="chipq" data-gex="${escapeAttr(e)}" style="margin:3px">${escapeHtml(e)}</button>`).join('')}</div>
-            <div id="govAskOut" style="margin-top:12px;font-size:13.5px"></div></div>`;
-        return explain + govAgent + custody + `<h2>Across the whole book</h2>` + answers +
-          `<div class="card"><h2 style="margin-top:0">Schema approvals</h2><table><thead><tr><th>Schema</th><th>Version</th><th>Recorded by</th><th>When</th><th>Note</th></tr></thead>
-            <tbody>${g.versions.map(v => `<tr><td style="font-weight:600">${escapeHtml(v.schema_name)}</td><td><span class="chip plain">${escapeHtml(v.version)}</span></td>
-              <td>${escapeHtml(v.created_by)}</td><td style="white-space:nowrap">${when(v.created_at)}</td><td style="font-size:12px;color:var(--slate2)">${escapeHtml(v.change_note || v.description || '')}</td></tr>`).join('')}</tbody></table></div>
-          <div class="card"><h2 style="margin-top:0">Human decisions</h2>${g.decisions.length ? `<table><thead><tr><th>When</th><th>Decision</th><th>By</th><th>Document</th><th>Reason</th></tr></thead>
-            <tbody>${g.decisions.slice().reverse().map(d => `<tr><td style="white-space:nowrap">${when(d.created_at)}</td><td><span class="chip plain">${escapeHtml(d.decision_type)}</span></td>
-              <td>${escapeHtml(d.actor)}</td><td style="font-size:12px">${escapeHtml(d.file_name || '')}</td><td style="font-size:12px;color:var(--mut)">${escapeHtml(d.reason || '')}</td></tr>`).join('')}</tbody></table>` : '<div style="color:var(--mut)">None yet.</div>'}</div>
-          <div class="card"><h2 style="margin-top:0">Agent reviews (advice only)</h2>${g.agents.length ? `<table><thead><tr><th>When</th><th>Agent</th><th>Subject</th><th>Asked by</th><th>Excerpt</th></tr></thead>
-            <tbody>${g.agents.map(a => `<tr><td style="white-space:nowrap">${when(a.created_at)}</td><td>${escapeHtml(a.agent)}</td><td style="font-size:12px">${escapeHtml(a.subject)}</td>
-              <td>${escapeHtml(a.requested_by)}</td><td style="font-size:12px;color:var(--mut)">${escapeHtml((a.excerpt || '').replace(/[*#]+/g, '').slice(0, 220))}…</td></tr>`).join('')}</tbody></table>` : '<div style="color:var(--mut)">No agent reviews yet.</div>'}</div>
+            <div style="margin-top:8px;display:flex;flex-wrap:wrap;gap:6px">${gex.map(e => `<button class="chipq" data-gex="${escapeAttr(e)}">${escapeHtml(e)}</button>`).join('')}</div>
+            <div id="govAskOut"></div>
+            <div style="font-size:11px;color:var(--mut);margin-top:6px">Answers only from the records, with names and dates; says so when the records do not hold the answer. Every question is logged.</div></div>`;
+        // ---- tabs
+        const TABS = [['contract', 'One contract'], ['approvals', 'Approvals & changes'], ['decisions', 'Decisions'], ['ai', 'AI & agents'], ['access', 'Access'], ['find', 'Where do I find…']];
+        const tabs = `<div class="gov-tabs">${TABS.map(([id, l]) => `<a href="${href(id, id === 'contract' && qs.get('m') ? '&m=' + encodeURIComponent(qs.get('m')) : '')}" class="${tab === id ? 'on' : ''}">${l}</a>`).join('')}</div>`;
+        let body = '';
+        if (tab === 'contract') {
+          if (!cu.custody) { body = `<div class="card">No contracts loaded yet — <a href="#mrc_inbox">Run intake</a> first.</div>`; }
+          else {
+            const k = cu.custody, c = k.contract, vers = k.schema_versions;
+            const read = vers.find(v => v.version === c.schema_version) || {}, orig = vers[0] || {};
+            const fails = k.checks.filter(x => x.status === 'fail');
+            const people = k.decisions.filter(d => d.decision_type !== 'metric_correction');
+            const fixes = k.decisions.filter(d => d.decision_type === 'metric_correction');
+            const agents = k.agents.filter(a => a.subject !== 'MRC intake');
+            const opt = x => `<option value="${escapeAttr(x.mrc_id)}" ${x.mrc_id === c.mrc_id ? 'selected' : ''}>${escapeHtml(x.umr + ' · ' + x.insured_name)}</option>`;
+            const picker = `<select id="govPick" aria-label="Choose a contract" class="gov-pick">
+                <optgroup label="Today's intake">${cu.contracts.filter(x => x.today).map(opt).join('')}</optgroup>
+                <optgroup label="Loaded earlier">${cu.contracts.filter(x => !x.today).map(opt).join('')}</optgroup></select>`;
+            const st = (h, a2, e, warn) => `<div class="st ${warn ? 'warn' : ''}"><div class="h">${h}</div><div class="a">${a2}</div>${e ? `<div class="e">${e}</div>` : ''}</div>`;
+            const timeline = `<div class="custody">
+                ${st('Received', `${day(c.ingested_at)} · <b>${escapeHtml(c.file_name)}</b>`, 'Original PDF kept unchanged in a governed volume.')}
+                ${st('Read with', `<b>${escapeHtml(c.schema_name.replace("Lloyd's ", ''))} ${escapeHtml(c.schema_version)}</b>`, `Recorded by ${escapeHtml(read.created_by || '—')} on ${day(read.created_at)}${read.change_note && read !== orig ? ' — “' + escapeHtml(read.change_note) + '”' : ''}`)}
+                ${st('Schema history', vers.map(v => `<span class="chip plain">${escapeHtml(v.version)}</span> ${v === orig ? 'approved' : 'changed'} by <b>${escapeHtml(v.created_by)}</b>, ${day(v.created_at)}`).join('<br>'), 'Append-only: a change adds a version; earlier versions stay readable.')}
+                ${st('Loaded', k.auto ? 'Automatically — <b>no person involved</b>' : (people.length ? people.map(d => `${escapeHtml(dec(d.decision_type))} by <b>${escapeHtml(d.actor)}</b>, ${day(d.created_at)}`).join('<br>') : 'After review'),
+                     k.auto ? 'It matched every expected field of a recorded schema.' : people.map(d => escapeHtml(d.reason || '')).filter(Boolean).join(' · '))}
+                ${st('Values', `<b>${k.traced} of ${k.values}</b> traced to their line in the contract`, 'Read by rule — no model supplied a value.')}
+                ${st('Market rules', fails.length ? `<b>${k.checks.length - fails.length} of ${k.checks.length}</b> pass` : `All <b>${k.checks.length}</b> pass`, fails.map(f => escapeHtml(f.label)).join(' · '), fails.length > 0)}
+                ${fixes.length ? st('Corrections', fixes.map(d => `<b>${escapeHtml(d.actor)}</b>, ${day(d.created_at)}`).join('<br>'), fixes.map(d => escapeHtml(d.reason || '')).join(' · ')) : ''}
+                ${st('AI involvement', agents.length ? agents.length + ' advisory review(s) — no decisions' : 'None — no model decided anything', agents.map(a => escapeHtml(a.agent.replace('_', ' ') + ', asked by ' + a.requested_by)).join(' · '))}
+              </div>`;
+            const glance = `<div class="card gov-glance">
+                <div class="h">At a glance</div>
+                <div class="row"><span>Schema</span><b>${escapeHtml(c.schema_version)} · ${escapeHtml(read.created_by || '—')}</b></div>
+                <div class="row"><span>Original schema</span><b>${escapeHtml(orig.created_by || '—')} · ${day(orig.created_at)}</b></div>
+                <div class="row"><span>How it loaded</span><b>${k.auto ? 'No person involved' : 'After a decision'}</b></div>
+                <div class="row"><span>Market rules</span><b class="${fails.length ? 'neg' : 'pos'}">${k.checks.length - fails.length} / ${k.checks.length} pass</b></div>
+                <div class="row"><span>Values traced</span><b>${k.traced} / ${k.values}</b></div>
+                <div class="row"><span>AI decisions</span><b>none</b></div>
+                <div class="links">
+                  <a href="#mrc_contract?m=${encodeURIComponent(c.mrc_id)}">Open the contract →</a>
+                  <a href="${escapeAttr(k.pdf)}" target="_blank" rel="noopener">Original PDF ↗</a>
+                  <a href="#mrc_contract?m=${encodeURIComponent(c.mrc_id)}">Every event (History) →</a></div></div>`;
+            body = `<div class="card">
+                <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:14px">
+                  <div><div style="font-size:18px;font-weight:800;color:var(--ink)">${escapeHtml(c.insured_name)}</div>
+                    <div style="font-size:12.5px;color:var(--mut)">${escapeHtml(c.umr)} · ${escapeHtml(c.class_of_business)} · ${escapeHtml(c.broker_name)}</div></div>
+                  ${picker}</div>
+                <div class="gov-two">${timeline}${glance}</div></div>`;
+          }
+        } else if (tab === 'approvals') {
+          const bySchema = {};
+          g.versions.forEach(v => { (bySchema[v.schema_name] = bySchema[v.schema_name] || []).push(v); });
+          body = Object.keys(bySchema).map(name => `<div class="card">
+              <div style="display:flex;justify-content:space-between;align-items:baseline"><h3 style="margin:0">${escapeHtml(name)}</h3><span style="font-size:12px;color:var(--mut)">${bySchema[name].length} version(s)</span></div>
+              <table style="margin-top:8px"><thead><tr><th style="width:70px">Version</th><th style="width:230px">Recorded by</th><th style="width:150px">When</th><th>Note</th></tr></thead><tbody>
+              ${bySchema[name].map((v, i) => `<tr><td><span class="chip plain">${escapeHtml(v.version)}</span></td><td><b>${escapeHtml(v.created_by)}</b>${i === 0 ? ' <span class="chip active">original</span>' : ''}</td><td>${when(v.created_at)}</td>
+                <td style="font-size:12.5px;color:var(--slate2)">${escapeHtml(v.change_note || v.description || '')}</td></tr>`).join('')}</tbody></table></div>`).join('')
+            + `<div class="card"><div style="display:flex;justify-content:space-between;align-items:baseline"><h3 style="margin:0">Market standard</h3><a href="#mrc_standard" style="font-size:12.5px">Open the standard →</a></div>
+              <table style="margin-top:8px"><thead><tr><th style="width:70px">Version</th><th style="width:230px">Recorded by</th><th style="width:150px">When</th><th>Note</th></tr></thead><tbody>
+              ${S.versions.slice().reverse().map(v => `<tr><td><span class="chip plain">MRC ${escapeHtml(v.version)}</span></td><td><b>${escapeHtml(v.created_by)}</b></td><td>${when(v.created_at)}</td><td style="font-size:12.5px;color:var(--slate2)">${escapeHtml(v.change_note || '')}</td></tr>`).join('')}</tbody></table>
+              <div style="font-size:12px;color:var(--mut);margin-top:8px">Nothing here is ever edited: a change adds a version with who, when and why.</div></div>`;
+        } else if (tab === 'decisions') {
+          const types = Array.from(new Set(g.decisions.map(d => d.decision_type)));
+          body = `<div class="card">
+              <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px"><button class="chipq on" data-dt="">All (${g.decisions.length})</button>${types.map(t => `<button class="chipq" data-dt="${escapeAttr(t)}">${escapeHtml(dec(t))} (${g.decisions.filter(d => d.decision_type === t).length})</button>`).join('')}</div>
+              ${g.decisions.length ? `<table><thead><tr><th style="width:150px">When</th><th style="width:190px">Decision</th><th style="width:220px">By</th><th>Document · reason</th></tr></thead><tbody>
+              ${g.decisions.slice().reverse().map(d => `<tr data-dtr="${escapeAttr(d.decision_type)}"><td>${when(d.created_at)}</td><td><b>${escapeHtml(dec(d.decision_type))}</b></td><td>${escapeHtml(d.actor)}</td>
+                <td style="font-size:12.5px"><span style="color:var(--ink)">${escapeHtml(d.file_name || '—')}</span><br><span style="color:var(--mut)">${escapeHtml(d.reason || '')}</span></td></tr>`).join('')}</tbody></table>` : '<div style="color:var(--mut)">No decisions yet.</div>'}
+              <div style="font-size:12px;color:var(--mut);margin-top:8px">Every decision is recorded under the signed-in person, with the reason, and is never edited. ${Sm.auto} contracts needed no decision at all.</div></div>`;
+        } else if (tab === 'ai') {
+          body = `<div class="gov-two" style="grid-template-columns:1fr 1fr">
+              <div class="card" style="margin:0"><h3 style="margin-top:0">What the AI may do</h3><ul class="gov-list">
+                <li>Read each PDF into text (<code>ai_parse_document</code>)</li><li>Propose ACORD mappings for an unfamiliar schema</li>
+                <li>Write advisory reviews from facts the system computed</li><li>Answer questions (Genie, Knowledge Assistant, this agent)</li></ul></div>
+              <div class="card" style="margin:0"><h3 style="margin-top:0">What only a person may do</h3><ul class="gov-list">
+                <li>Record a schema or a new standard version</li><li>Accept a layout change</li><li>Return or reject a document</li><li>Correct a value</li></ul>
+                <div style="font-size:12px;color:var(--mut)">Values are read by rule; market rules are code. Decisions made by AI: <b>none</b>.</div></div></div>
+            <div class="card"><h3 style="margin-top:0">Agent reviews on record (${g.agents.length})</h3>
+              ${g.agents.length ? `<table><thead><tr><th style="width:150px">When</th><th style="width:150px">Agent</th><th style="width:230px">About</th><th>Asked by · excerpt</th></tr></thead><tbody>
+              ${g.agents.map(a => `<tr><td>${when(a.created_at)}</td><td><b>${escapeHtml(a.agent.replace(/_/g, ' '))}</b></td><td style="font-size:12.5px">${escapeHtml(a.subject)}</td>
+                <td style="font-size:12.5px"><span>${escapeHtml(a.requested_by)}</span><br><span style="color:var(--mut)">${escapeHtml((a.excerpt || '').replace(/[*#]+/g, '').slice(0, 180))}…</span></td></tr>`).join('')}</tbody></table>` : '<div style="color:var(--mut)">No agent reviews yet.</div>'}
+              <div style="font-size:12px;color:var(--mut);margin-top:8px">Each review is stored with the exact facts it was given and the model used, so its advice can be checked.</div></div>`;
+        } else if (tab === 'access') {
+          body = `<div class="card"><h3 style="margin-top:0">Who can see and change this data</h3>
+              <div style="font-size:15px;font-weight:600;margin:6px 0 12px">${escapeHtml(Sm.access || '')}</div>
+              <ul class="gov-list"><li>Access is set once in <b>Unity Catalog</b> and applies everywhere — this app, Genie, the Knowledge Assistant, notebooks and dashboards.</li>
+                <li>The app acts under its own service principal; every human act is recorded under the signed-in person.</li>
+                <li>The original PDFs sit in a governed volume with the same permissions.</li>
+                <li>Nothing leaves the workspace: parsing, the models, Genie and the Knowledge Assistant run inside the platform.</li></ul>
+              <div style="font-size:12px;color:var(--mut)">Individual users are counted rather than listed on screen. The full grant list is in Unity Catalog (Catalog Explorer → the schema → Permissions).</div></div>`;
+        } else {
+          const F2 = [['Who approved a schema, and when', 'Governance → Approvals & changes', href('approvals')],
+                      ['Everything that happened to one contract', 'Governance → One contract (or Contracts → the contract → History)', href('contract')],
+                      ['The exact line a value came from', 'Contracts → the contract → Values & lineage', '#mrc_contracts'],
+                      ['The original PDF', 'Contracts → the contract → Document', '#mrc_contracts'],
+                      ['Which contracts fail a market rule, and why', 'Contracts → Needs attention (or Analytics)', '#mrc_contracts'],
+                      ['The Core Data Record fields for a contract', 'Contracts → the contract → Core Data Record', '#mrc_contracts'],
+                      ['What changed in a layout and who accepted it', 'Schemas → Repository (versions + change notes)', '#mrc_schemas'],
+                      ['The MRC v3 standard we read to', 'Schemas → Market standard', '#mrc_standard'],
+                      ['Who made each decision, and why', 'Governance → Decisions', href('decisions')],
+                      ['What the AI did on a contract', 'Governance → AI & agents', href('ai')],
+                      ['Who can access the data', 'Governance → Access', href('access')],
+                      ['Every event, in order', 'Governance → Audit trail', '#mrc_audit'],
+                      ['How it all works', 'Learn → Architecture', '#mrc_learn']];
+          body = `<div class="card"><h3 style="margin-top:0">Where do I find…</h3><table><tbody>
+              ${F2.map(r => `<tr><td style="font-weight:600;width:42%">${escapeHtml(r[0])}</td><td style="font-size:13px;color:var(--slate2)">${escapeHtml(r[1])}</td><td style="width:70px;text-align:right"><a href="${escapeAttr(r[2])}">Go →</a></td></tr>`).join('')}</tbody></table></div>`;
+        }
+        return `<details class="details-summary"><summary>What am I seeing?</summary>
+            <div class="body">Governance for the MRC book, read live from the records the system keeps — schema versions, decisions, checks, agent reviews and access. The figures at the top answer the usual questions at a glance; the tabs hold the detail; the agent answers anything else from the same records.</div></details>`
+          + kpis + agent + tabs + body + `
           <script>
-            document.getElementById('govPick').addEventListener('change', function(){ window.location.hash = '#mrc_governance?m=' + encodeURIComponent(this.value); });
+            var pk = document.getElementById('govPick');
+            if (pk) { pk.addEventListener('change', function(){ window.location.hash = '#mrc_governance?t=contract&m=' + encodeURIComponent(this.value); }); }
+            document.querySelectorAll('[data-dt]').forEach(function(b){ b.addEventListener('click', function(){
+              var t = b.getAttribute('data-dt');
+              document.querySelectorAll('[data-dt]').forEach(function(x){ x.classList.toggle('on', x === b); });
+              document.querySelectorAll('[data-dtr]').forEach(function(tr){ tr.style.display = (!t || tr.getAttribute('data-dtr') === t) ? '' : 'none'; }); }); });
             var gi = document.getElementById('govAskInput');
             document.querySelectorAll('[data-gex]').forEach(function(b){ b.addEventListener('click', function(){ gi.value = b.getAttribute('data-gex'); document.getElementById('govAskBtn').click(); }); });
             gi.addEventListener('keydown', function(ev){ if (ev.key === 'Enter') { document.getElementById('govAskBtn').click(); } });
             document.getElementById('govAskBtn').addEventListener('click', async function(){
               var qv = gi.value.trim(), out = document.getElementById('govAskOut'), b = this; if (!qv) { return; }
-              b.disabled = true; out.innerHTML = '<span class="spin"></span> Reading the governance records…';
+              b.disabled = true; out.className = 'gov-answer'; out.innerHTML = '<span class="spin"></span> Reading the governance records…';
               try { var r = await fetchJSON('/api/mrc/agent/governance', {method:'POST', body:{question: qv}});
-                    out.innerHTML = md(r.answer) + '<div style="font-size:11px;color:var(--mut);margin-top:6px">Logged as ' + escapeHtml(r.note_id) + (r.cached ? ' · replayed from cache' : '') + ' · answered from the records only</div>'; }
+                    out.innerHTML = '<div style="font-size:11px;font-weight:800;color:#6d28d9;text-transform:uppercase;letter-spacing:.06em;margin-bottom:4px">' + escapeHtml(qv) + '</div>' + md(r.answer)
+                      + '<div style="font-size:11px;color:var(--mut);margin-top:6px">Logged as ' + escapeHtml(r.note_id) + (r.cached ? ' · replayed from cache' : '') + ' · from the records only</div>'; }
               catch(e) { out.innerHTML = '<div class="error-banner">' + escapeHtml(e.message) + '</div>'; }
               b.disabled = false;
             });

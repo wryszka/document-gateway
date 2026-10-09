@@ -750,7 +750,13 @@ def mrc_governance():
          "a": f"Access is governed in Unity Catalog: {_grant_summary(grants)}.",
          "evidence": []},
     ]
-    return {"questions": questions, "versions": versions, "decisions": decisions, "agents": agents}
+    total = int(q(f"SELECT count(*) FROM {F}.v_mrc_entities_latest")[0][0])
+    failing = len({f["umr"] for f in fails})
+    summary = {"contracts": total, "auto": len(auto), "versions": len(versions), "decisions": len(decisions),
+               "failing": failing, "agents": len(agents), "access": _grant_summary(grants),
+               "latest_version": versions[-1] if versions else None}
+    return {"questions": questions, "versions": versions, "decisions": decisions, "agents": agents,
+            "summary": summary, "auto_list": auto, "fails": fails}
 
 
 # Editable metric columns — an allowlist; the field name is validated against this

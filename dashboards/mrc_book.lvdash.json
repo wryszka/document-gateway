@@ -402,15 +402,67 @@
         "name": "main_query",
         "query": {
          "datasetName": "ds_attention",
-         "fields": [],
+         "fields": [
+          {
+           "name": "umr",
+           "expression": "`umr`"
+          },
+          {
+           "name": "insured_name",
+           "expression": "`insured_name`"
+          },
+          {
+           "name": "class_of_business",
+           "expression": "`class_of_business`"
+          },
+          {
+           "name": "broker_name",
+           "expression": "`broker_name`"
+          },
+          {
+           "name": "failed_rule",
+           "expression": "`failed_rule`"
+          },
+          {
+           "name": "detail",
+           "expression": "`detail`"
+          }
+         ],
          "disaggregated": true
         }
        }
       ],
       "spec": {
-       "version": 1,
+       "version": 2,
        "widgetType": "table",
-       "encodings": {},
+       "encodings": {
+        "columns": [
+         {
+          "fieldName": "umr",
+          "displayName": "UMR"
+         },
+         {
+          "fieldName": "insured_name",
+          "displayName": "Insured"
+         },
+         {
+          "fieldName": "class_of_business",
+          "displayName": "Class"
+         },
+         {
+          "fieldName": "broker_name",
+          "displayName": "Broker"
+         },
+         {
+          "fieldName": "failed_rule",
+          "displayName": "Rule failed"
+         },
+         {
+          "fieldName": "detail",
+          "displayName": "Detail"
+         }
+        ]
+       },
        "frame": {
         "title": "Contracts that need attention",
         "showTitle": true
@@ -432,15 +484,107 @@
         "name": "main_query",
         "query": {
          "datasetName": "ds_book",
-         "fields": [],
+         "fields": [
+          {
+           "name": "umr",
+           "expression": "`umr`"
+          },
+          {
+           "name": "insured_name",
+           "expression": "`insured_name`"
+          },
+          {
+           "name": "class_of_business",
+           "expression": "`class_of_business`"
+          },
+          {
+           "name": "broker_name",
+           "expression": "`broker_name`"
+          },
+          {
+           "name": "slip_leader",
+           "expression": "`slip_leader`"
+          },
+          {
+           "name": "premium_currency",
+           "expression": "`premium_currency`"
+          },
+          {
+           "name": "premium_amount",
+           "expression": "`premium_amount`"
+          },
+          {
+           "name": "certainty_status",
+           "expression": "`certainty_status`"
+          },
+          {
+           "name": "schema_version",
+           "expression": "`schema_version`"
+          },
+          {
+           "name": "month",
+           "expression": "`month`"
+          },
+          {
+           "name": "route",
+           "expression": "`route`"
+          }
+         ],
          "disaggregated": true
         }
        }
       ],
       "spec": {
-       "version": 1,
+       "version": 2,
        "widgetType": "table",
-       "encodings": {},
+       "encodings": {
+        "columns": [
+         {
+          "fieldName": "umr",
+          "displayName": "UMR"
+         },
+         {
+          "fieldName": "insured_name",
+          "displayName": "Insured"
+         },
+         {
+          "fieldName": "class_of_business",
+          "displayName": "Class"
+         },
+         {
+          "fieldName": "broker_name",
+          "displayName": "Broker"
+         },
+         {
+          "fieldName": "slip_leader",
+          "displayName": "Slip leader"
+         },
+         {
+          "fieldName": "premium_currency",
+          "displayName": "Currency"
+         },
+         {
+          "fieldName": "premium_amount",
+          "displayName": "Premium"
+         },
+         {
+          "fieldName": "certainty_status",
+          "displayName": "Market rules"
+         },
+         {
+          "fieldName": "schema_version",
+          "displayName": "Read with"
+         },
+         {
+          "fieldName": "month",
+          "displayName": "Loaded"
+         },
+         {
+          "fieldName": "route",
+          "displayName": "How it loaded"
+         }
+        ]
+       },
        "frame": {
         "title": "The book \u2014 every loaded contract",
         "showTitle": true
@@ -451,7 +595,7 @@
       "x": 0,
       "y": 24,
       "width": 6,
-      "height": 8
+      "height": 9
      }
     }
    ],

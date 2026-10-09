@@ -65,10 +65,13 @@ def spec(F):
                          "frame": {"title": title, "showTitle": True}}},
                 "position": {"x": x0, "y": y0, "width": w, "height": h}}
 
-    def table(name, ds, title, w=6, h=7, x0=0, y0=0):
+    def table(name, ds, title, cols, w=6, h=7, x0=0, y0=0):
+        # Tables need their columns listed (spec version 2) — an empty list imports as invalid.
         return {"widget": {"name": name, "queries": [{"name": "main_query", "query": {
-                    "datasetName": ds, "fields": [], "disaggregated": True}}],
-                "spec": {"version": 1, "widgetType": "table", "encodings": {},
+                    "datasetName": ds, "fields": [{"name": c, "expression": f"`{c}`"} for c, _ in cols],
+                    "disaggregated": True}}],
+                "spec": {"version": 2, "widgetType": "table",
+                         "encodings": {"columns": [{"fieldName": c, "displayName": d} for c, d in cols]},
                          "frame": {"title": title, "showTitle": True}}},
                 "position": {"x": x0, "y": y0, "width": w, "height": h}}
 
@@ -79,8 +82,14 @@ def spec(F):
         chart("w_premium", "ds_premium", "class_of_business", "premium", "Premium by class — per currency (never added across currencies)", "bar", "premium_currency", 3, 6, 0, 12),
         chart("w_leader", "ds_leader", "slip_leader", "contracts", "Most frequent slip leaders", "bar", None, 3, 6, 3, 12),
         chart("w_rules", "ds_rules", "market_rule", "contracts", "Market rules failed", "bar", None, 2, 6, 0, 18),
-        table("t_attention", "ds_attention", "Contracts that need attention", 4, 6, 2, 18),
-        table("t_book", "ds_book", "The book — every loaded contract", 6, 8, 0, 24),
+        table("t_attention", "ds_attention", "Contracts that need attention",
+              [("umr", "UMR"), ("insured_name", "Insured"), ("class_of_business", "Class"), ("broker_name", "Broker"),
+               ("failed_rule", "Rule failed"), ("detail", "Detail")], 4, 6, 2, 18),
+        table("t_book", "ds_book", "The book — every loaded contract",
+              [("umr", "UMR"), ("insured_name", "Insured"), ("class_of_business", "Class"), ("broker_name", "Broker"),
+               ("slip_leader", "Slip leader"), ("premium_currency", "Currency"), ("premium_amount", "Premium"),
+               ("certainty_status", "Market rules"), ("schema_version", "Read with"), ("month", "Loaded"),
+               ("route", "How it loaded")], 6, 9, 0, 24),
     ]
     return {"datasets": datasets,
             "pages": [{"name": "book", "displayName": "MRC book", "layout": layout, "pageType": "PAGE_TYPE_CANVAS"}]}
