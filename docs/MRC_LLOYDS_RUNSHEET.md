@@ -69,6 +69,12 @@ Format per beat: **GO** (where) · **DO** (the one action) · **SAY** (≤20 wor
 - **DO:** **Return to broker** → reason "Full MRC required" → Confirm.
 - **SAY:** "Not a contract. Held for a person, never loaded — and the decision is recorded."
 
+## Beat 6b — The market standard (optional, 1.5 min) — when asked "you work to MRC v3: where is it, and what about v4?"
+- **GO:** **Schemas → Market standard**.
+- **DO:** show MRC v3 in force: 7 sections, 22 data points (label as written · ACORD term · CDR field), 7 market rules, recorded by Priya Natarajan (Market Data Standards). Press **Draft MRC v4 from MRC v3 →**: rename a label, add a data point, show the change note and *Also record the open-market schema*. **Cancel** unless you want v4 on record (Reset removes it).
+- **SAY:** "The standard is a versioned record, not buried in code. When v4 is published, someone drafts it from v3 and records it; the matching schema is recorded with it, so v4 contracts are recognised by their fingerprint. v3 stays in force for v3 documents."
+- **IF ASKED** "and the rules?" — rules are code, versioned in the repository; a new rule is a reviewed change, not an edit on this screen.
+
 ## Beat 7 — The repository has learned (1 min)
 - **GO:** **Schemas** → Repository.
 - **DO:** show the two schemas, the v2 change note and the description you typed.
@@ -89,13 +95,15 @@ Format per beat: **GO** (where) · **DO** (the one action) · **SAY** (≤20 wor
 - **DO:** point at the dashboard first: contracts in the book (a year of earlier loads plus today's), share loaded with no person, share passing every market rule, contracts by month, by class, by broker, slip leaders, rules failed. Then press the example *"Show me all contracts placed by Willis Towers Watson on marine"*.
 - **SAY:** "A year of contracts, read once and checked — most landed with no one touching them. Ask it anything: one answer from the data with its query shown, one from the wording."
 - **IF SLOW:** the structured answer arrives first; the wording answer follows (allow ~30 s). In CACHED mode a question already asked returns instantly.
-- **OPTIONAL:** *Core Data Record completeness →* for the book-wide view; correct a premium in the metrics table (saved and audited).
+- **OPTIONAL:** tab **Databricks dashboard (AI/BI)** — the same book as a native Databricks dashboard, embedded (*Open in Databricks ↗* to filter or extend it). "Same governed views, so the numbers agree — and nobody needs the app to use it."
+- **OPTIONAL:** *Core Data Record completeness →* for the book-wide view; *Premium by class · correct a value →* (saved and audited).
 - **IF ASKED** "what does LMA5218 actually say?" — MRCs reference clauses by number; the wording lives in the LMA clause library. Index that library alongside the contracts and the same assistant quotes it.
 
 ## Beat 10 — Governance: answers, not slides (2.5 min)
 - **GO:** **Governance**. It opens on today's changed contract (Ashgrove, read with **Open Market v2**).
 - **DO:** read the chain top to bottom: *Received* (date, original PDF kept) → *Read with* v2, **recorded by you, today** (your sign-in identity) → *Schema history*: **original v1 approved by Priya Natarajan (Market Data Standards)** a year ago, v2 by you with your change note → *Values*: every value traced to its line → *Market rules* → *AI involvement* → *Who can see it*. Then switch the picker to an earlier contract ("Loaded earlier") to show the same chain for a contract loaded months ago with no one involved.
 - **SAY:** "Any contract, any question: who approved the schema it was read with, when the original was approved, who changed it and why, and what the AI did — which is nothing it could decide."
+- **ASK THE AGENT:** in **🤖 Governance agent**, press *"Who approved the schema the Ashgrove contract was read with, and when?"* (or type their question). "It answers only from the records — names, dates, versions — and says so when the records don't hold the answer. The question is logged too." In CACHED mode a repeated question is instant.
 - **THEN:** scroll to *Across the whole book* — each line is an answer with its records behind it (schema approvals, human decisions, agent reviews).
 - **CLOSE (the result):** "Five of eight contracts landed with no one touching them. The three exceptions each took one decision, and that decision is now on record, so the next document like it goes straight through. Every value traces to its line in the wording. Open code, your workspace, the same loop for any document the market exchanges." (Full trail: *Audit →*.)
 - **IF ASKED** "where does the logic run?" — "The data, schema versions, decisions and audit are governed tables. Reading and Ask are platform services. For this demo the orchestration runs inside the app; in production it moves into scheduled Jobs and Unity Catalog functions, with approvals as platform permissions." (Q&A #13.)

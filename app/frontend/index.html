@@ -148,6 +148,7 @@
           {id:'mrc_recognition', label:'Schema Recognition', hidden:true, parent:'mrc_schemas'},
           {id:'mrc_changes', label:'Schema Changes', hidden:true, parent:'mrc_schemas'},
           {id:'mrc_semantics', label:'Vocabulary', hidden:true, parent:'mrc_schemas'},
+          {id:'mrc_standard', label:'Market standard', hidden:true, parent:'mrc_schemas'},
           {id:'mrc_contracts', label:'Contracts', icon:'📜', cap:'Search any contract'},
           {id:'mrc_contract', label:'Contract', hidden:true, parent:'mrc_contracts'},
           {id:'mrc_certainty', label:'Contract Certainty', hidden:true, parent:'mrc_contracts'},
@@ -211,7 +212,7 @@
       try { st = ((await (await fetch('/api/mrc/progress')).json()).states) || {}; } catch (e) {}
       const tab = (id, label, n) => `<a href="#${id}" style="display:inline-block;padding:9px 16px;margin-right:4px;border-radius:9px 9px 0 0;text-decoration:none;font-weight:600;
           ${active === id ? 'background:var(--card);color:var(--ink);border:1px solid var(--line);border-bottom-color:var(--card)' : 'color:var(--mut)'}">${label}${n ? ` <span class="chip differs" style="margin-left:4px">${n}</span>` : ''}</a>`;
-      return `<div style="border-bottom:1px solid var(--line);margin-bottom:16px">${tab('mrc_schemas', 'Repository', 0)}${tab('mrc_recognition', 'Recognition', st.new_schema || 0)}${tab('mrc_changes', 'Changes', st.schema_changed || 0)}${tab('mrc_semantics', 'Vocabulary', 0)}</div>`;
+      return `<div style="border-bottom:1px solid var(--line);margin-bottom:16px">${tab('mrc_schemas', 'Repository', 0)}${tab('mrc_recognition', 'Recognition', st.new_schema || 0)}${tab('mrc_changes', 'Changes', st.schema_changed || 0)}${tab('mrc_semantics', 'Vocabulary', 0)}${tab('mrc_standard', 'Market standard', 0)}</div>`;
     }
 
     // Fetch helper with loading state
@@ -846,6 +847,20 @@
       },
 
       'mrc_analytics': async function() {
+        const aqs = new URLSearchParams((window.location.hash.split('?')[1]) || '');
+        const atab = aqs.get('t') || 'app';
+        const atabs = `<div style="border-bottom:1px solid var(--line);margin-bottom:16px">${[['app', 'Dashboard and ask'], ['dbx', 'Databricks dashboard (AI/BI)']].map(([id, l]) =>
+          `<a href="#mrc_analytics?t=${id}" style="display:inline-block;padding:9px 16px;margin-right:4px;border-radius:9px 9px 0 0;text-decoration:none;font-weight:600;${atab === id ? 'background:var(--card);color:var(--ink);border:1px solid var(--line);border-bottom-color:var(--card)' : 'color:var(--mut)'}">${l}</a>`).join('')}</div>`;
+        if (atab === 'dbx') {
+          const cf = await fetchJSON('/api/config');
+          if (!cf.mrc_dashboard_id) return atabs + `<div class="card">The Databricks dashboard has not been created yet — run <code>tools/create_mrc_dashboard.py</code>.</div>`;
+          const open = `${cf.host}/dashboardsv3/${cf.mrc_dashboard_id}/published`;
+          return atabs + `<details class="details-summary" open><summary>What am I seeing?</summary>
+              <div class="body">The same book as a native Databricks AI/BI dashboard, embedded here. It reads the same governed views as the in-app dashboard, so the numbers agree; it is built from a definition in the repository (<code>dashboards/mrc_book.lvdash.json</code>) and anyone with access can open it in Databricks, filter it, or extend it without touching the app.</div></details>
+            <div style="margin:-4px 0 10px;font-size:13px"><a href="${escapeAttr(open)}" target="_blank" rel="noopener">Open in Databricks ↗</a></div>
+            <iframe src="${escapeAttr(cf.host + '/embed/dashboardsv3/' + cf.mrc_dashboard_id)}" title="MRC book — Databricks dashboard"
+              style="width:100%;height:1500px;border:1px solid var(--line);border-radius:12px;background:#fff"></iframe>`;
+        }
         const dsh = await fetchJSON('/api/mrc/dashboard');
         const K = dsh.kpis, pct = (a, b) => b ? Math.round(100 * a / b) + '%' : '—';
         const hbars = (rows, lab) => { const mx = Math.max(1, ...rows.map(r => Number(r.n))); return rows.map(r => `<div class="hbar"><span class="t" title="${escapeAttr(String(r[lab] || '—'))}">${escapeHtml(String(r[lab] || '—'))}</span><span class="b"><i style="width:${Math.round(100 * Number(r.n) / mx)}%"></i></span><span class="n">${r.n}</span></div>`).join(''); };
@@ -911,7 +926,7 @@
           <\/script>`;
         const more = `<div class="card" style="display:flex;gap:18px;flex-wrap:wrap;align-items:center"><b>Across the book:</b>
             <a href="#mrc_cdr">Core Data Record completeness →</a><a href="#mrc_certainty">Contract certainty, every contract →</a><a href="#mrc_lineage">Lineage explorer →</a><a href="#mrc_metrics">Premium by class · correct a value →</a></div>`;
-        return dash + ask + more;
+        return atabs + dash + ask + more;
       },
 
       'mrc_governance': async function() {
@@ -963,7 +978,21 @@
         const answers = g.questions.map(x => `<div class="card ans"><div class="a">${escapeHtml(x.a)}</div>
             ${x.evidence.length ? `<details style="margin-top:6px"><summary style="cursor:pointer;font-size:12px;color:var(--brand)">Show the ${x.evidence.length} record(s)</summary>
               <ul style="margin:6px 0 0 18px;font-size:12px;color:var(--slate2)">${x.evidence.slice(0, 60).map(e => `<li>${escapeHtml(e)}</li>`).join('')}</ul></details>` : ''}</div>`).join('');
-        return explain + custody + `<h2>Across the whole book</h2>` + answers +
+        const gex = ['Who approved the schema the Ashgrove contract was read with, and when?',
+                     'What changes have been made to the open-market schema — by whom, and why?',
+                     'Which contracts were loaded with no person involved, and which needed a decision?',
+                     'Did the AI decide anything on any contract?',
+                     'Who corrected values in the book, and when?',
+                     'Show the full history of the NovaTech contract.',
+                     'Who can access this data?'];
+        const govAgent = `<div class="card" style="border-left:4px solid #7c3aed">
+            <div style="font-weight:700;margin-bottom:2px">🤖 Governance agent — ask who did what</div>
+            <div style="font-size:12px;color:var(--mut);margin-bottom:10px">Answers only from the governance records (schema versions, decisions, each contract's route and checks, corrections, agent reviews, access), names the people and dates, and says so when the records do not hold the answer. Every question asked is logged.</div>
+            <div style="display:flex;gap:10px"><input type="text" id="govAskInput" aria-label="Ask a governance question" placeholder="e.g. Who approved the schema used for this contract?" style="flex:1;padding:9px;border:1px solid var(--line2);border-radius:8px">
+              <button class="act" id="govAskBtn">Ask</button></div>
+            <div style="margin-top:8px">${gex.map(e => `<button class="chipq" data-gex="${escapeAttr(e)}" style="margin:3px">${escapeHtml(e)}</button>`).join('')}</div>
+            <div id="govAskOut" style="margin-top:12px;font-size:13.5px"></div></div>`;
+        return explain + govAgent + custody + `<h2>Across the whole book</h2>` + answers +
           `<div class="card"><h2 style="margin-top:0">Schema approvals</h2><table><thead><tr><th>Schema</th><th>Version</th><th>Recorded by</th><th>When</th><th>Note</th></tr></thead>
             <tbody>${g.versions.map(v => `<tr><td style="font-weight:600">${escapeHtml(v.schema_name)}</td><td><span class="chip plain">${escapeHtml(v.version)}</span></td>
               <td>${escapeHtml(v.created_by)}</td><td style="white-space:nowrap">${when(v.created_at)}</td><td style="font-size:12px;color:var(--slate2)">${escapeHtml(v.change_note || v.description || '')}</td></tr>`).join('')}</tbody></table></div>
@@ -975,6 +1004,17 @@
               <td>${escapeHtml(a.requested_by)}</td><td style="font-size:12px;color:var(--mut)">${escapeHtml((a.excerpt || '').replace(/[*#]+/g, '').slice(0, 220))}…</td></tr>`).join('')}</tbody></table>` : '<div style="color:var(--mut)">No agent reviews yet.</div>'}</div>
           <script>
             document.getElementById('govPick').addEventListener('change', function(){ window.location.hash = '#mrc_governance?m=' + encodeURIComponent(this.value); });
+            var gi = document.getElementById('govAskInput');
+            document.querySelectorAll('[data-gex]').forEach(function(b){ b.addEventListener('click', function(){ gi.value = b.getAttribute('data-gex'); document.getElementById('govAskBtn').click(); }); });
+            gi.addEventListener('keydown', function(ev){ if (ev.key === 'Enter') { document.getElementById('govAskBtn').click(); } });
+            document.getElementById('govAskBtn').addEventListener('click', async function(){
+              var qv = gi.value.trim(), out = document.getElementById('govAskOut'), b = this; if (!qv) { return; }
+              b.disabled = true; out.innerHTML = '<span class="spin"></span> Reading the governance records…';
+              try { var r = await fetchJSON('/api/mrc/agent/governance', {method:'POST', body:{question: qv}});
+                    out.innerHTML = md(r.answer) + '<div style="font-size:11px;color:var(--mut);margin-top:6px">Logged as ' + escapeHtml(r.note_id) + (r.cached ? ' · replayed from cache' : '') + ' · answered from the records only</div>'; }
+              catch(e) { out.innerHTML = '<div class="error-banner">' + escapeHtml(e.message) + '</div>'; }
+              b.disabled = false;
+            });
           <\/script>`;
       },
 
@@ -1086,6 +1126,111 @@
         return tabs + `<details class="details-summary" open><summary>What am I seeing?</summary>
             <div class="body">How the MRC flow is built, for anyone presenting it: the one-minute answer, the architecture, what each button does, what runs where, what the AI does and does not do, and links to every live object.</div></details>`
           + minute + diagram + pressT + runs + ai + assets + faqT;
+      },
+
+      'mrc_standard': async function() {
+        const S = await fetchJSON('/api/mrc/standard');
+        const cur = S.current, sp = cur.spec;
+        const qs = new URLSearchParams((window.location.hash.split('?')[1]) || '');
+        const editing = qs.get('edit') === '1';
+        const day = t => { const d = new Date(String(t || '').replace(' ', 'T')); return isNaN(d) ? escapeHtml(t) : escapeHtml(d.toLocaleDateString('en-GB', {day: 'numeric', month: 'long', year: 'numeric'})); };
+        const explain = `<details class="details-summary" open><summary>What am I seeing?</summary>
+            <div class="body">The market standard the gateway reads to — the structure a Market Reform Contract follows: its title, its sections, the data points under each (with the label as written in the contract, the ACORD term it binds to and the indicative Core Data Record field) and the market rules checked against it. Versions are append-only. When the market publishes a new version, draft it here from the current one and record it: the matching open-market schema is recorded with it, so documents laid out to the new version are recognised by their fingerprint.</div></details>`;
+        const nextV = 'v' + (parseInt(String(cur.version).replace(/\D/g, '') || '3', 10) + 1);
+        const bySec = sec => sp.data_points.filter(p => p.section === sec);
+        const head = `<div class="strip">
+            <div><div class="lbl">Standard in force</div><div class="big brand" style="font-size:20px">MRC ${escapeHtml(cur.version)}</div></div>
+            <div><div class="lbl">Sections</div><div class="big" style="font-size:18px">${sp.sections.length}</div></div>
+            <div><div class="lbl">Data points</div><div class="big" style="font-size:18px">${sp.data_points.length}</div></div>
+            <div><div class="lbl">Market rules</div><div class="big" style="font-size:18px">${(sp.rules || []).length}</div></div>
+            <div><div class="lbl">Recorded</div><div style="font-weight:700;color:#fff">${escapeHtml(cur.created_by)}<br><span style="font-weight:500;opacity:.8">${day(cur.created_at)}</span></div></div>
+          </div>`;
+        if (!editing) {
+          const secs = sp.sections.map(sec => { const pts = bySec(sec); return `<div class="card">
+              <div style="display:flex;justify-content:space-between;align-items:baseline"><h3 style="margin:0">${escapeHtml(sec)}</h3><span style="font-size:12px;color:var(--mut)">${pts.length} data point(s)</span></div>
+              ${pts.length ? `<table style="margin-top:8px"><thead><tr><th>Data point</th><th>Label as written in the contract</th><th>ACORD term</th><th>Core Data Record (indicative)</th><th>Required</th></tr></thead>
+                <tbody>${pts.map(p => `<tr><td style="font-weight:600">${escapeHtml(p.display)}${p.core ? ' <span class="chip active">core</span>' : ''}</td><td>“${escapeHtml(p.label)}”</td><td><code style="font-size:11.5px">${escapeHtml(p.acord || '')}</code></td><td style="font-size:12.5px">${escapeHtml(p.cdr || '')}</td><td>${p.required ? '✓' : ''}</td></tr>`).join('')}</tbody></table>`
+                : '<div style="font-size:12.5px;color:var(--mut);margin-top:6px">Narrative section — read and kept with the document, no data points.</div>'}</div>`; }).join('');
+          const rules = `<div class="card"><h3 style="margin-top:0">Market rules checked against this standard</h3><ol style="margin:0 0 0 18px;line-height:1.7">${(sp.rules || []).map(r => `<li>${escapeHtml(r.label)}</li>`).join('')}</ol>
+              <div style="font-size:12px;color:var(--mut);margin-top:6px">Rules are code, versioned in the repository — adding one is a reviewed change, not an edit on this screen.</div></div>`;
+          const built = `<div class="card"><h3 style="margin-top:0">Built on the standard</h3><table><thead><tr><th>Schema in the repository</th><th class="num">Contracts read with it</th></tr></thead>
+              <tbody>${S.schemas.map(x => `<tr><td>${escapeHtml(x.name)}</td><td class="num">${x.contracts}</td></tr>`).join('')}</tbody></table></div>`;
+          const hist = `<div class="card"><h3 style="margin-top:0">Versions on record</h3><table><thead><tr><th>Version</th><th>Recorded by</th><th>When</th><th>Data points</th><th>Change note</th></tr></thead>
+              <tbody>${S.versions.slice().reverse().map(v => `<tr><td><span class="chip plain">MRC ${escapeHtml(v.version)}</span></td><td>${escapeHtml(v.created_by)}</td><td style="white-space:nowrap">${day(v.created_at)}</td><td>${v.spec.data_points.length}</td><td style="font-size:12.5px;color:var(--slate2)">${escapeHtml(v.change_note || '')}</td></tr>`).join('')}</tbody></table></div>`;
+          return await schemaTabs('mrc_standard') + explain + head +
+            `<div class="card" style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap">
+               <div style="font-size:13px;color:var(--slate2);max-width:820px">${escapeHtml(sp.reference || '')} Title the gateway recognises: <b>${escapeHtml(sp.title)}</b>.</div>
+               <a class="act" style="text-decoration:none;padding:8px 14px;border-radius:8px" href="#mrc_standard?edit=1">Draft MRC ${nextV} from MRC ${escapeHtml(cur.version)} →</a></div>`
+            + secs + rules + built + hist;
+        }
+        // Editor: a copy of the current version to change.
+        window.__stdRules = sp.rules || []; window.__stdRef = sp.reference || '';
+        const opts = (sel) => ['<option value="">— no ACORD term —</option>'].concat(Array.from(new Set(S.bindings.concat(sp.data_points.map(p => p.acord).filter(Boolean)))).sort()
+            .map(b => `<option ${b === sel ? 'selected' : ''}>${escapeHtml(b)}</option>`)).join('');
+        const secOpts = (sel) => sp.sections.map(x => `<option ${x === sel ? 'selected' : ''}>${escapeHtml(x)}</option>`).join('');
+        const row = p => `<tr data-dp="1" data-key="${escapeAttr(p.key || '')}" data-core="${p.core ? '1' : ''}">
+            <td><select data-f="section" style="max-width:190px">${secOpts(p.section)}</select></td>
+            <td><input data-f="display" value="${escapeAttr(p.display || '')}" style="width:170px"></td>
+            <td><input data-f="label" value="${escapeAttr(p.label || '')}" style="width:190px"></td>
+            <td><select data-f="acord" style="max-width:200px">${opts(p.acord)}</select></td>
+            <td><input data-f="cdr" value="${escapeAttr(p.cdr || '')}" style="width:160px"></td>
+            <td style="text-align:center"><input type="checkbox" data-f="required" ${p.required ? 'checked' : ''}></td>
+            <td><button class="ghost" data-rm="1" title="Remove this data point">✕</button></td></tr>`;
+        return await schemaTabs('mrc_standard') + explain + `
+          <div class="card" style="border-left:4px solid #f59e0b">
+            <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap">
+              <div><div style="font-size:11px;color:var(--mut);text-transform:uppercase;letter-spacing:.07em;font-weight:800">Drafting from MRC ${escapeHtml(cur.version)}</div>
+                <div style="font-size:18px;font-weight:800">New version: <input id="stdVer" value="${nextV}" style="width:80px;font-size:16px;font-weight:800;padding:4px 8px;border:1px solid var(--line2);border-radius:6px"></div></div>
+              <a href="#mrc_standard" style="font-size:13px">Cancel — back to MRC ${escapeHtml(cur.version)}</a></div>
+            <div style="font-size:12.5px;color:var(--slate2);margin-top:8px">Change labels as the new version writes them, add or remove data points, add sections. Nothing changes until you record it — and recording never edits MRC ${escapeHtml(cur.version)}; it adds MRC <span id="stdVerEcho">${nextV}</span> alongside it.</div>
+          </div>
+          <div class="card"><h3 style="margin-top:0">Title and sections</h3>
+            <div style="display:grid;grid-template-columns:1fr 2fr;gap:14px">
+              <label style="font-size:12px;color:var(--mut)">Document title<br><input id="stdTitle" value="${escapeAttr(sp.title)}" style="width:100%;padding:8px;border:1px solid var(--line2);border-radius:8px;margin-top:4px"></label>
+              <label style="font-size:12px;color:var(--mut)">Sections, one per line (the headings that make up the fingerprint)<br><textarea id="stdSecs" rows="7" style="width:100%;padding:8px;border:1px solid var(--line2);border-radius:8px;margin-top:4px;font:13px system-ui">${escapeHtml(sp.sections.join('\n'))}</textarea></label></div></div>
+          <div class="card"><div style="display:flex;justify-content:space-between;align-items:center"><h3 style="margin:0">Data points</h3><button class="ghost" id="stdAdd">+ Add a data point</button></div>
+            <table class="reconciliation-table" style="margin-top:8px"><thead><tr><th>Section</th><th>Data point</th><th>Label as written</th><th>ACORD term</th><th>Core Data Record</th><th>Req.</th><th></th></tr></thead>
+              <tbody id="stdRows">${sp.data_points.map(row).join('')}</tbody></table>
+            <table style="display:none"><tbody id="stdTpl">${row({display: '', label: '', acord: '', cdr: '', required: true, section: sp.sections[1] || sp.sections[0]})}</tbody></table></div>
+          <div class="card"><h3 style="margin-top:0">Record it</h3>
+            <textarea id="stdNote" rows="2" placeholder="What changed in this version, and where it comes from (e.g. the published guidance and its date)" style="width:100%;padding:9px;border:1px solid var(--line2);border-radius:8px;font:13px system-ui"></textarea>
+            <label style="display:block;margin:10px 0;font-size:13px"><input type="checkbox" id="stdSchema" checked> Also record the open-market schema for this version, so documents laid out to it are recognised automatically</label>
+            <button class="act" id="stdRecord">Record MRC <span id="stdVerEcho2">${nextV}</span></button>
+            <span style="font-size:12px;color:var(--mut);margin-left:10px">Recorded under your sign-in; MRC ${escapeHtml(cur.version)} stays on record and in force for its documents.</span>
+            <div id="stdOut" style="margin-top:10px"></div></div>
+          <script>
+            var rules = window.__stdRules;
+            function wire(tr){ var b = tr.querySelector('[data-rm]'); if (b) { b.addEventListener('click', function(){ tr.remove(); }); } }
+            document.querySelectorAll('#stdRows tr').forEach(wire);
+            document.getElementById('stdAdd').addEventListener('click', function(){
+              var tr = document.querySelector('#stdTpl tr').cloneNode(true); document.getElementById('stdRows').appendChild(tr); wire(tr); tr.querySelector('[data-f=display]').focus(); });
+            document.getElementById('stdVer').addEventListener('input', function(){ document.getElementById('stdVerEcho').textContent = this.value; document.getElementById('stdVerEcho2').textContent = this.value; });
+            document.getElementById('stdSecs').addEventListener('change', function(){
+              var secs = this.value.split('\\n').map(function(x){ return x.trim(); }).filter(Boolean);
+              document.querySelectorAll('#stdRows select[data-f=section], #stdTpl select[data-f=section]').forEach(function(sel){
+                var cur = sel.value; sel.innerHTML = ''; secs.forEach(function(x){ var o = document.createElement('option'); o.textContent = x; if (x === cur) { o.selected = true; } sel.appendChild(o); }); });
+            });
+            document.getElementById('stdRecord').addEventListener('click', async function(){
+              var b = this, out = document.getElementById('stdOut');
+              var pts = Array.prototype.map.call(document.querySelectorAll('#stdRows tr'), function(tr){
+                var g = function(f){ return tr.querySelector('[data-f=' + f + ']'); };
+                return {key: tr.getAttribute('data-key') || '', core: tr.getAttribute('data-core') === '1', section: g('section').value,
+                        display: g('display').value.trim(), label: g('label').value.trim(), acord: g('acord').value,
+                        cdr: g('cdr').value.trim(), required: g('required').checked}; }).filter(function(p){ return p.label; });
+              var spec = {title: document.getElementById('stdTitle').value.trim(),
+                          sections: document.getElementById('stdSecs').value.split('\\n').map(function(x){ return x.trim(); }).filter(Boolean),
+                          data_points: pts, rules: rules, reference: window.__stdRef};
+              var ver = document.getElementById('stdVer').value.trim();
+              var c = await confirm('Record MRC ' + ver + ' with ' + pts.length + ' data points? This adds a new version; nothing already recorded is changed.');
+              if (!c.confirmed) { return; }
+              b.disabled = true; out.innerHTML = '<span class="spin"></span> Recording…';
+              try { var r = await fetchJSON('/api/mrc/standard', {method:'POST', body:{version: ver, spec: spec,
+                        change_note: document.getElementById('stdNote').value, create_schema: document.getElementById('stdSchema').checked}});
+                    toast('MRC ' + r.version + ' recorded' + (r.schema ? ' — schema recorded: ' + r.schema : ''));
+                    window.location.hash = '#mrc_standard'; }
+              catch(e) { out.innerHTML = '<div class="error-banner">' + escapeHtml(e.message) + '</div>'; b.disabled = false; }
+            });
+          <\/script>`;
       },
 
       'mrc_certainty': async function() {

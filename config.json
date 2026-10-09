@@ -40,5 +40,8 @@
       "config": "tenants/mrc/tenant.json",
       "_note": "Prose deterministic path (MRC heading anchors) + AI graph extraction + dual-retrieval ask-surface (KA + Genie)."
     }
+  },
+  "dashboards": {
+    "mrc": "01f1c3da4d2c170a913ee612d89c7c96"
   }
 }

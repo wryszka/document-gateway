@@ -1,0 +1,461 @@
+{
+ "datasets": [
+  {
+   "name": "ds_month",
+   "displayName": "Contracts loaded by month",
+   "queryLines": [
+    "SELECT month, route, count(*) AS contracts FROM (SELECT e.umr, e.insured_name, e.class_of_business, e.broker_name,\n                      regexp_extract(e.slip_leader, 'Syndicate ([0-9]+)', 0) AS slip_leader,\n                      e.premium_currency, e.premium_amount, e.signed_lines_total, e.certainty_status,\n                      concat(e.schema_name, ' ', e.schema_version) AS schema_version,\n                      date_format(d.ingested_at, 'yyyy-MM') AS month,\n                      CASE WHEN a.entity_id IS NOT NULL THEN 'No person involved' ELSE 'After a decision by a person' END AS route\n               FROM lr_dev_aws_us_catalog.document_gateway.v_mrc_entities_latest e JOIN lr_dev_aws_us_catalog.document_gateway.source_document d ON e.source_document_id = d.doc_id\n               LEFT JOIN (SELECT DISTINCT entity_id FROM lr_dev_aws_us_catalog.document_gateway.audit_event WHERE event_type = 'auto_ingested') a\n                 ON a.entity_id = d.doc_id) GROUP BY 1, 2 ORDER BY 1"
+   ]
+  },
+  {
+   "name": "ds_class",
+   "displayName": "Contracts by class",
+   "queryLines": [
+    "SELECT class_of_business, count(*) AS contracts FROM (SELECT e.umr, e.insured_name, e.class_of_business, e.broker_name,\n                      regexp_extract(e.slip_leader, 'Syndicate ([0-9]+)', 0) AS slip_leader,\n                      e.premium_currency, e.premium_amount, e.signed_lines_total, e.certainty_status,\n                      concat(e.schema_name, ' ', e.schema_version) AS schema_version,\n                      date_format(d.ingested_at, 'yyyy-MM') AS month,\n                      CASE WHEN a.entity_id IS NOT NULL THEN 'No person involved' ELSE 'After a decision by a person' END AS route\n               FROM lr_dev_aws_us_catalog.document_gateway.v_mrc_entities_latest e JOIN lr_dev_aws_us_catalog.document_gateway.source_document d ON e.source_document_id = d.doc_id\n               LEFT JOIN (SELECT DISTINCT entity_id FROM lr_dev_aws_us_catalog.document_gateway.audit_event WHERE event_type = 'auto_ingested') a\n                 ON a.entity_id = d.doc_id) GROUP BY 1 ORDER BY 2 DESC"
+   ]
+  },
+  {
+   "name": "ds_broker",
+   "displayName": "Contracts by broker",
+   "queryLines": [
+    "SELECT broker_name, count(*) AS contracts FROM (SELECT e.umr, e.insured_name, e.class_of_business, e.broker_name,\n                      regexp_extract(e.slip_leader, 'Syndicate ([0-9]+)', 0) AS slip_leader,\n                      e.premium_currency, e.premium_amount, e.signed_lines_total, e.certainty_status,\n                      concat(e.schema_name, ' ', e.schema_version) AS schema_version,\n                      date_format(d.ingested_at, 'yyyy-MM') AS month,\n                      CASE WHEN a.entity_id IS NOT NULL THEN 'No person involved' ELSE 'After a decision by a person' END AS route\n               FROM lr_dev_aws_us_catalog.document_gateway.v_mrc_entities_latest e JOIN lr_dev_aws_us_catalog.document_gateway.source_document d ON e.source_document_id = d.doc_id\n               LEFT JOIN (SELECT DISTINCT entity_id FROM lr_dev_aws_us_catalog.document_gateway.audit_event WHERE event_type = 'auto_ingested') a\n                 ON a.entity_id = d.doc_id) GROUP BY 1 ORDER BY 2 DESC"
+   ]
+  },
+  {
+   "name": "ds_leader",
+   "displayName": "Slip leaders",
+   "queryLines": [
+    "SELECT slip_leader, count(*) AS contracts FROM (SELECT e.umr, e.insured_name, e.class_of_business, e.broker_name,\n                      regexp_extract(e.slip_leader, 'Syndicate ([0-9]+)', 0) AS slip_leader,\n                      e.premium_currency, e.premium_amount, e.signed_lines_total, e.certainty_status,\n                      concat(e.schema_name, ' ', e.schema_version) AS schema_version,\n                      date_format(d.ingested_at, 'yyyy-MM') AS month,\n                      CASE WHEN a.entity_id IS NOT NULL THEN 'No person involved' ELSE 'After a decision by a person' END AS route\n               FROM lr_dev_aws_us_catalog.document_gateway.v_mrc_entities_latest e JOIN lr_dev_aws_us_catalog.document_gateway.source_document d ON e.source_document_id = d.doc_id\n               LEFT JOIN (SELECT DISTINCT entity_id FROM lr_dev_aws_us_catalog.document_gateway.audit_event WHERE event_type = 'auto_ingested') a\n                 ON a.entity_id = d.doc_id) GROUP BY 1 ORDER BY 2 DESC LIMIT 10"
+   ]
+  },
+  {
+   "name": "ds_premium",
+   "displayName": "Premium by class and currency",
+   "queryLines": [
+    "SELECT class_of_business, premium_currency, round(sum(premium_amount), 0) AS premium\n                            FROM (SELECT e.umr, e.insured_name, e.class_of_business, e.broker_name,\n                      regexp_extract(e.slip_leader, 'Syndicate ([0-9]+)', 0) AS slip_leader,\n                      e.premium_currency, e.premium_amount, e.signed_lines_total, e.certainty_status,\n                      concat(e.schema_name, ' ', e.schema_version) AS schema_version,\n                      date_format(d.ingested_at, 'yyyy-MM') AS month,\n                      CASE WHEN a.entity_id IS NOT NULL THEN 'No person involved' ELSE 'After a decision by a person' END AS route\n               FROM lr_dev_aws_us_catalog.document_gateway.v_mrc_entities_latest e JOIN lr_dev_aws_us_catalog.document_gateway.source_document d ON e.source_document_id = d.doc_id\n               LEFT JOIN (SELECT DISTINCT entity_id FROM lr_dev_aws_us_catalog.document_gateway.audit_event WHERE event_type = 'auto_ingested') a\n                 ON a.entity_id = d.doc_id) WHERE premium_currency IS NOT NULL GROUP BY 1, 2 ORDER BY 3 DESC"
+   ]
+  },
+  {
+   "name": "ds_rules",
+   "displayName": "Market rules failed",
+   "queryLines": [
+    "SELECT label AS market_rule, count(*) AS contracts FROM lr_dev_aws_us_catalog.document_gateway.v_mrc_certainty_latest\n                            WHERE status = 'fail' GROUP BY 1 ORDER BY 2 DESC"
+   ]
+  },
+  {
+   "name": "ds_attention",
+   "displayName": "Contracts that need attention",
+   "queryLines": [
+    "SELECT b.umr, b.insured_name, b.class_of_business, b.broker_name, c.label AS failed_rule, c.detail\n                            FROM (SELECT e.umr, e.insured_name, e.class_of_business, e.broker_name,\n                      regexp_extract(e.slip_leader, 'Syndicate ([0-9]+)', 0) AS slip_leader,\n                      e.premium_currency, e.premium_amount, e.signed_lines_total, e.certainty_status,\n                      concat(e.schema_name, ' ', e.schema_version) AS schema_version,\n                      date_format(d.ingested_at, 'yyyy-MM') AS month,\n                      CASE WHEN a.entity_id IS NOT NULL THEN 'No person involved' ELSE 'After a decision by a person' END AS route\n               FROM lr_dev_aws_us_catalog.document_gateway.v_mrc_entities_latest e JOIN lr_dev_aws_us_catalog.document_gateway.source_document d ON e.source_document_id = d.doc_id\n               LEFT JOIN (SELECT DISTINCT entity_id FROM lr_dev_aws_us_catalog.document_gateway.audit_event WHERE event_type = 'auto_ingested') a\n                 ON a.entity_id = d.doc_id) b JOIN lr_dev_aws_us_catalog.document_gateway.v_mrc_entities_latest e ON e.umr = b.umr\n                            JOIN lr_dev_aws_us_catalog.document_gateway.v_mrc_certainty_latest c ON c.mrc_id = e.mrc_id AND c.status = 'fail' ORDER BY b.umr"
+   ]
+  },
+  {
+   "name": "ds_book",
+   "displayName": "The book",
+   "queryLines": [
+    "SELECT umr, insured_name, class_of_business, broker_name, slip_leader, premium_currency,\n                                   premium_amount, certainty_status, schema_version, month, route FROM (SELECT e.umr, e.insured_name, e.class_of_business, e.broker_name,\n                      regexp_extract(e.slip_leader, 'Syndicate ([0-9]+)', 0) AS slip_leader,\n                      e.premium_currency, e.premium_amount, e.signed_lines_total, e.certainty_status,\n                      concat(e.schema_name, ' ', e.schema_version) AS schema_version,\n                      date_format(d.ingested_at, 'yyyy-MM') AS month,\n                      CASE WHEN a.entity_id IS NOT NULL THEN 'No person involved' ELSE 'After a decision by a person' END AS route\n               FROM lr_dev_aws_us_catalog.document_gateway.v_mrc_entities_latest e JOIN lr_dev_aws_us_catalog.document_gateway.source_document d ON e.source_document_id = d.doc_id\n               LEFT JOIN (SELECT DISTINCT entity_id FROM lr_dev_aws_us_catalog.document_gateway.audit_event WHERE event_type = 'auto_ingested') a\n                 ON a.entity_id = d.doc_id) ORDER BY month DESC, umr"
+   ]
+  }
+ ],
+ "pages": [
+  {
+   "name": "book",
+   "displayName": "MRC book",
+   "layout": [
+    {
+     "widget": {
+      "name": "w_month",
+      "queries": [
+       {
+        "name": "main_query",
+        "query": {
+         "datasetName": "ds_month",
+         "fields": [
+          {
+           "name": "month",
+           "expression": "`month`"
+          },
+          {
+           "name": "contracts",
+           "expression": "`contracts`"
+          },
+          {
+           "name": "route",
+           "expression": "`route`"
+          }
+         ],
+         "disaggregated": true
+        }
+       }
+      ],
+      "spec": {
+       "version": 3,
+       "widgetType": "bar",
+       "encodings": {
+        "x": {
+         "fieldName": "month",
+         "scale": {
+          "type": "categorical"
+         }
+        },
+        "y": {
+         "fieldName": "contracts",
+         "scale": {
+          "type": "quantitative"
+         }
+        },
+        "color": {
+         "fieldName": "route",
+         "scale": {
+          "type": "categorical"
+         }
+        }
+       },
+       "frame": {
+        "title": "Contracts loaded by month \u2014 no person involved vs after a decision",
+        "showTitle": true
+       }
+      }
+     },
+     "position": {
+      "x": 0,
+      "y": 0,
+      "width": 6,
+      "height": 6
+     }
+    },
+    {
+     "widget": {
+      "name": "w_class",
+      "queries": [
+       {
+        "name": "main_query",
+        "query": {
+         "datasetName": "ds_class",
+         "fields": [
+          {
+           "name": "class_of_business",
+           "expression": "`class_of_business`"
+          },
+          {
+           "name": "contracts",
+           "expression": "`contracts`"
+          }
+         ],
+         "disaggregated": true
+        }
+       }
+      ],
+      "spec": {
+       "version": 3,
+       "widgetType": "bar",
+       "encodings": {
+        "x": {
+         "fieldName": "class_of_business",
+         "scale": {
+          "type": "categorical"
+         }
+        },
+        "y": {
+         "fieldName": "contracts",
+         "scale": {
+          "type": "quantitative"
+         }
+        }
+       },
+       "frame": {
+        "title": "Contracts by class of business",
+        "showTitle": true
+       }
+      }
+     },
+     "position": {
+      "x": 0,
+      "y": 6,
+      "width": 3,
+      "height": 6
+     }
+    },
+    {
+     "widget": {
+      "name": "w_broker",
+      "queries": [
+       {
+        "name": "main_query",
+        "query": {
+         "datasetName": "ds_broker",
+         "fields": [
+          {
+           "name": "broker_name",
+           "expression": "`broker_name`"
+          },
+          {
+           "name": "contracts",
+           "expression": "`contracts`"
+          }
+         ],
+         "disaggregated": true
+        }
+       }
+      ],
+      "spec": {
+       "version": 3,
+       "widgetType": "bar",
+       "encodings": {
+        "x": {
+         "fieldName": "broker_name",
+         "scale": {
+          "type": "categorical"
+         }
+        },
+        "y": {
+         "fieldName": "contracts",
+         "scale": {
+          "type": "quantitative"
+         }
+        }
+       },
+       "frame": {
+        "title": "Contracts by broker",
+        "showTitle": true
+       }
+      }
+     },
+     "position": {
+      "x": 3,
+      "y": 6,
+      "width": 3,
+      "height": 6
+     }
+    },
+    {
+     "widget": {
+      "name": "w_premium",
+      "queries": [
+       {
+        "name": "main_query",
+        "query": {
+         "datasetName": "ds_premium",
+         "fields": [
+          {
+           "name": "class_of_business",
+           "expression": "`class_of_business`"
+          },
+          {
+           "name": "premium",
+           "expression": "`premium`"
+          },
+          {
+           "name": "premium_currency",
+           "expression": "`premium_currency`"
+          }
+         ],
+         "disaggregated": true
+        }
+       }
+      ],
+      "spec": {
+       "version": 3,
+       "widgetType": "bar",
+       "encodings": {
+        "x": {
+         "fieldName": "class_of_business",
+         "scale": {
+          "type": "categorical"
+         }
+        },
+        "y": {
+         "fieldName": "premium",
+         "scale": {
+          "type": "quantitative"
+         }
+        },
+        "color": {
+         "fieldName": "premium_currency",
+         "scale": {
+          "type": "categorical"
+         }
+        }
+       },
+       "frame": {
+        "title": "Premium by class \u2014 per currency (never added across currencies)",
+        "showTitle": true
+       }
+      }
+     },
+     "position": {
+      "x": 0,
+      "y": 12,
+      "width": 3,
+      "height": 6
+     }
+    },
+    {
+     "widget": {
+      "name": "w_leader",
+      "queries": [
+       {
+        "name": "main_query",
+        "query": {
+         "datasetName": "ds_leader",
+         "fields": [
+          {
+           "name": "slip_leader",
+           "expression": "`slip_leader`"
+          },
+          {
+           "name": "contracts",
+           "expression": "`contracts`"
+          }
+         ],
+         "disaggregated": true
+        }
+       }
+      ],
+      "spec": {
+       "version": 3,
+       "widgetType": "bar",
+       "encodings": {
+        "x": {
+         "fieldName": "slip_leader",
+         "scale": {
+          "type": "categorical"
+         }
+        },
+        "y": {
+         "fieldName": "contracts",
+         "scale": {
+          "type": "quantitative"
+         }
+        }
+       },
+       "frame": {
+        "title": "Most frequent slip leaders",
+        "showTitle": true
+       }
+      }
+     },
+     "position": {
+      "x": 3,
+      "y": 12,
+      "width": 3,
+      "height": 6
+     }
+    },
+    {
+     "widget": {
+      "name": "w_rules",
+      "queries": [
+       {
+        "name": "main_query",
+        "query": {
+         "datasetName": "ds_rules",
+         "fields": [
+          {
+           "name": "market_rule",
+           "expression": "`market_rule`"
+          },
+          {
+           "name": "contracts",
+           "expression": "`contracts`"
+          }
+         ],
+         "disaggregated": true
+        }
+       }
+      ],
+      "spec": {
+       "version": 3,
+       "widgetType": "bar",
+       "encodings": {
+        "x": {
+         "fieldName": "market_rule",
+         "scale": {
+          "type": "categorical"
+         }
+        },
+        "y": {
+         "fieldName": "contracts",
+         "scale": {
+          "type": "quantitative"
+         }
+        }
+       },
+       "frame": {
+        "title": "Market rules failed",
+        "showTitle": true
+       }
+      }
+     },
+     "position": {
+      "x": 0,
+      "y": 18,
+      "width": 2,
+      "height": 6
+     }
+    },
+    {
+     "widget": {
+      "name": "t_attention",
+      "queries": [
+       {
+        "name": "main_query",
+        "query": {
+         "datasetName": "ds_attention",
+         "fields": [],
+         "disaggregated": true
+        }
+       }
+      ],
+      "spec": {
+       "version": 1,
+       "widgetType": "table",
+       "encodings": {},
+       "frame": {
+        "title": "Contracts that need attention",
+        "showTitle": true
+       }
+      }
+     },
+     "position": {
+      "x": 2,
+      "y": 18,
+      "width": 4,
+      "height": 6
+     }
+    },
+    {
+     "widget": {
+      "name": "t_book",
+      "queries": [
+       {
+        "name": "main_query",
+        "query": {
+         "datasetName": "ds_book",
+         "fields": [],
+         "disaggregated": true
+        }
+       }
+      ],
+      "spec": {
+       "version": 1,
+       "widgetType": "table",
+       "encodings": {},
+       "frame": {
+        "title": "The book \u2014 every loaded contract",
+        "showTitle": true
+       }
+      }
+     },
+     "position": {
+      "x": 0,
+      "y": 24,
+      "width": 6,
+      "height": 8
+     }
+    }
+   ],
+   "pageType": "PAGE_TYPE_CANVAS"
+  }
+ ]
+}

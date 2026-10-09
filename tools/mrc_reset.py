@@ -53,7 +53,7 @@ def reset(cfg, regenerate=True):
     docs, mrcs = _hist(F)
     _sql_retry(f"""DELETE FROM {F}.audit_event WHERE
             (entity_id IN (SELECT doc_id FROM {F}.source_document WHERE tenant='mrc')
-             OR entity_type IN ('mrc_entities', 'mrc_inbox', 'mrc_agent_note') OR (entity_type = 'template' AND entity_id LIKE '%/mrc'))
+             OR entity_type IN ('mrc_entities', 'mrc_inbox', 'mrc_agent_note', 'mrc_standard') OR (entity_type = 'template' AND entity_id LIKE '%/mrc'))
             AND entity_id NOT IN {docs} AND entity_id NOT IN {mrcs}""", cfg)
     _sql_retry(f"""DELETE FROM {F}.decision WHERE tenant='mrc'
             AND coalesce(source_document_id, '') NOT IN {docs}""", cfg)
@@ -68,6 +68,8 @@ def reset(cfg, regenerate=True):
     if mrc_history.present(cfg) == 0:   # first reset on a fresh schema: load the earlier contracts
         mrc_history.seed(cfg)
     mrc_history.backdate_v1(cfg, mrc_history.build()[1])
+    from jobs import mrc_standard
+    mrc_standard.clear_drafts(cfg)   # the standard back to MRC v3 only
     mrc_schemas.receive_inbox(cfg)
     states = sql(f"""SELECT inbound_state, count(*) FROM {F}.source_document WHERE tenant='mrc'
                      AND stored_path LIKE '%/mrc_inbox/%' GROUP BY 1""", cfg=cfg)

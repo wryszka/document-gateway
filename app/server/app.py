@@ -108,6 +108,7 @@ def config():
             "genie_space_id": g.get("space_id", ""),
             "mrc_space_id": g.get("mrc_space_id", ""),
             "mrc_ka_endpoint": g.get("mrc_ka_endpoint", ""),
+            "mrc_dashboard_id": (CFG.get("dashboards") or {}).get("mrc", ""),
             "models": CFG["models"]}
 
 
@@ -639,6 +640,53 @@ def mrc_custody(mrc_id: str | None = None):
         "schema_versions": versions, "decisions": decisions, "agents": agents, "auto": auto,
         "values": len(c["values"]), "traced": sum(1 for v in c["values"] if v.get("source_quote")),
         "grants": _grant_summary(grants), "volume": CFG["volume_path"]}}
+
+
+@app.post("/api/mrc/agent/governance")
+def mrc_agent_governance(request: Request, body: dict = Body(...), mode: str = "live"):
+    """Governance agent: answers who-did-what questions from the governance records only. Logged."""
+    question = (body.get("question") or "").strip()
+    if not question:
+        raise HTTPException(400, "Ask a question")
+    grants = []
+    try:
+        grants = [{"principal": r[0], "privilege": r[1]} for r in q(f"SHOW GRANTS ON SCHEMA {F}")]
+    except Exception:
+        pass
+    try:
+        return ma.governance_answer(CFG, question[:500], actor=_who(request, body), access=_grant_summary(grants),
+                                    cache=_AI_CACHE if mode == "cached" else None)
+    except Exception as e:
+        raise HTTPException(500, f"Agent unavailable: {e}")
+
+
+@app.get("/api/mrc/standard")
+def mrc_standard_get():
+    """The market standard in force (MRC v3), every recorded version, and what is built on it."""
+    from jobs import mrc_standard as std
+    std.seed(CFG)
+    vers = std.versions(CFG)
+    used = {r[0]: int(r[1]) for r in q(f"""SELECT concat(schema_name, ' ', schema_version), count(*)
+                                          FROM {F}.v_mrc_entities_latest GROUP BY 1""")}
+    names = [r[0] for r in q(f"SELECT DISTINCT counterparty FROM {F}.template WHERE doc_family='mrc'")]
+    return {"standard": std.STANDARD, "versions": vers, "current": vers[-1] if vers else None,
+            "schemas": [{"name": n, "contracts": sum(c for k, c in used.items() if k.startswith(n))} for n in sorted(names)],
+            "bindings": ms._dictionary_bindings(CFG)}
+
+
+@app.post("/api/mrc/standard")
+def mrc_standard_record(request: Request, body: dict = Body(...)):
+    """Record the next version of the standard (append-only) and its open-market schema."""
+    from jobs import mrc_standard as std
+    version, spec, note = (body.get("version") or "").strip(), body.get("spec") or {}, (body.get("change_note") or "").strip()
+    if not version or not spec.get("data_points"):
+        raise HTTPException(400, "A version name and at least one data point are required")
+    if not note:
+        raise HTTPException(400, "Say what changed in this version (change note)")
+    try:
+        return std.record(CFG, version, spec, note, _who(request, body), create_schema=bool(body.get("create_schema", True)))
+    except ValueError as e:
+        raise HTTPException(400, str(e))
 
 
 @app.get("/api/mrc/governance")

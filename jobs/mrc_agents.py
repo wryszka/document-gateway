@@ -115,3 +115,76 @@ def schema_review(cfg, kind, payload, actor="presenter", cache=None):
     subject = payload.get("file_name") or payload.get("name") or kind
     nid = _log(cfg, "schema_review", f"{kind}: {subject}", payload, out, actor)
     return {"note_id": nid, "review": out, "cached": cached}
+
+
+# ------------------------------------------------------------------ governance agent (Q&A)
+GOV_RULES = ("You are the governance assistant for a Lloyd's Market Reform Contract gateway. Answer the question "
+             "using ONLY the records provided. Name the people, dates, schema versions and contracts (UMR and insured) "
+             "the records show. If the records do not contain the answer, say so plainly and say which record would "
+             "hold it — never guess or invent. Never convert or add up amounts in different currencies. "
+             "Format: one or two plain sentences that answer directly, then '### From the records' with up to eight "
+             "bullet points (date · who · what). Under 220 words. Precise, plain English, no hype.")
+
+
+def governance_facts(cfg, question, access=""):
+    F = cfg["full_schema"]
+    def rows(stmt, keys, params=None):
+        return [dict(zip(keys, r)) for r in sql(stmt, params=params, cfg=cfg)]
+    versions = rows(f"""SELECT t.counterparty, t.template_version, t.created_by, cast(t.created_at AS STRING), t.field_count,
+                               n.description, n.change_note
+                        FROM {F}.template t LEFT JOIN {F}.mrc_schema_note n
+                          ON n.schema_name = t.counterparty AND n.schema_version = t.template_version
+                        WHERE t.doc_family = 'mrc' ORDER BY t.created_at""",
+                    ["schema", "version", "recorded_by", "recorded_at", "data_points", "description", "change_note"])
+    decisions = rows(f"""SELECT cast(dc.created_at AS STRING), dc.decision_type, dc.actor, d.file_name, dc.template_version, dc.reason
+                         FROM {F}.decision dc LEFT JOIN {F}.source_document d ON dc.source_document_id = d.doc_id
+                         WHERE dc.tenant = 'mrc' ORDER BY dc.created_at""",
+                     ["when", "decision", "by", "document", "schema_version", "reason"])
+    contracts = rows(f"""SELECT e.umr, e.insured_name, e.class_of_business, e.broker_name,
+                                concat(e.schema_name, ' ', e.schema_version), cast(d.ingested_at AS STRING),
+                                CASE WHEN a.entity_id IS NOT NULL THEN 'loaded automatically, no person involved'
+                                     ELSE 'loaded after a person''s decision' END,
+                                e.certainty_status, d.file_name,
+                                d.stored_path LIKE '%/mrc_inbox/%'
+                         FROM {F}.v_mrc_entities_latest e JOIN {F}.source_document d ON e.source_document_id = d.doc_id
+                         LEFT JOIN (SELECT DISTINCT entity_id FROM {F}.audit_event WHERE event_type = 'auto_ingested') a
+                           ON a.entity_id = d.doc_id ORDER BY d.ingested_at""",
+                     ["umr", "insured", "class", "broker", "read_with", "received", "route", "certainty", "file", "todays_intake"])
+    fails = rows(f"""SELECT e.umr, c.label, c.detail FROM {F}.v_mrc_certainty_latest c
+                     JOIN {F}.v_mrc_entities_latest e ON c.mrc_id = e.mrc_id WHERE c.status = 'fail' ORDER BY e.umr""",
+                 ["umr", "rule", "detail"])
+    held = rows(f"""SELECT file_name, inbound_state, signed_off_by, cast(signed_off_at AS STRING) FROM {F}.source_document
+                    WHERE tenant = 'mrc' AND inbound_state IN ('rejected', 'returned', 'unrecognised', 'new_schema', 'schema_changed')""",
+                ["file", "state", "by", "when"])
+    agents = rows(f"""SELECT cast(created_at AS STRING), agent, subject, requested_by, model FROM {F}.mrc_agent_note
+                      WHERE agent <> 'governance_qa' ORDER BY created_at""",
+                  ["when", "agent", "subject", "asked_by", "model"])
+    events = rows(f"""SELECT event_type, count(*) FROM {F}.audit_event
+                      WHERE entity_type IN ('source_document', 'mrc_entities', 'template', 'mrc_inbox')
+                      GROUP BY 1 ORDER BY 2 DESC""", ["event", "count"])
+    # The contract the question is about (by UMR or insured name), with its full event trail.
+    ql, focus = question.lower(), []
+    for c in contracts:
+        first = (c["insured"] or "").split()[0].lower() if c["insured"] else ""
+        if (c["umr"] or "").lower() in ql or (first and len(first) > 3 and first in ql):
+            trail = rows(f"""SELECT cast(a.created_at AS STRING), a.event_type, a.actor, a.detail FROM {F}.audit_event a
+                             JOIN {F}.source_document d ON a.entity_id = d.doc_id OR a.entity_id = concat('policy_', substr(split(d.doc_id, '-')[1], 1, 8))
+                             WHERE d.file_name = :f ORDER BY a.created_at""", ["when", "event", "by", "detail"], {"f": c["file"]})
+            focus.append({**c, "events": trail, "failed_rules": [f for f in fails if f["umr"] == c["umr"]]})
+    return {
+        "schema_versions": versions, "human_decisions": decisions, "contracts": contracts,
+        "failed_market_rules": fails, "documents_held_or_waiting": held, "agent_reviews": agents,
+        "event_counts": events, "contract_in_question": focus[:3], "access": access,
+        "policy": ("Values are read by rule from labelled lines; the model may only propose mappings for an unfamiliar "
+                   "schema and write advisory reviews; only a signed-in person records a schema version, accepts a "
+                   "change, returns a document or corrects a value; records are append-only."),
+    }
+
+
+def governance_answer(cfg, question, actor="presenter", access="", cache=None):
+    facts = governance_facts(cfg, question, access)
+    prompt = GOV_RULES + "\n\nQUESTION: " + question + "\n\nRECORDS:\n" + json.dumps(facts, indent=0, default=str)[:24000]
+    out, cached = _llm(cfg, prompt, cache)
+    nid = _log(cfg, "governance_qa", question[:200], facts, out, actor)
+    return {"note_id": nid, "answer": out, "cached": cached,
+            "records_used": {k: len(v) for k, v in facts.items() if isinstance(v, list)}}

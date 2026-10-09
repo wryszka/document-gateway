@@ -288,7 +288,9 @@ def classify(cfg, path, text=None):
     best, score = None, 0.0
     for sc in schemas(cfg):
         m = _match(fp, sc)
-        if m > score:
+        # On an equal match the open-market v3 schema wins, so recording a later standard
+        # (e.g. MRC v4 with the same headings) never captures v3 documents.
+        if m > score or (m == score and m > 0 and sc["name"] == OPEN_MARKET):
             best, score = sc, m
     if best is None or score < 0.8:
         return {"outcome": "new", "fingerprint": fp, "text": text}
