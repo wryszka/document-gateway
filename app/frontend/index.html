@@ -32,6 +32,7 @@
     .nav-flow-ic{font-size:20px}
     .nav-flow-t{font-size:13px;font-weight:700;color:#f1f5f9;line-height:1.2}
     .nav-flow-s{font-size:11px;color:#94a3b8;margin-top:2px}
+    .nav-run{display:flex;gap:8px;align-items:center;margin:0 6px 10px;padding:8px 11px;border-radius:10px;background:#fef3c7;color:#92400e;font-size:12.5px;font-weight:700;text-decoration:none}
     .nav-steps{position:relative;display:flex;flex-direction:column;gap:2px}
     .nav-step{display:flex;gap:11px;align-items:center;padding:9px 10px;border-radius:10px;text-decoration:none;color:#cbd5e1;position:relative}
     .nav-step:hover{background:rgba(255,255,255,.06);color:#fff}
@@ -354,6 +355,24 @@
                         recognise: 'Recording the new schema and ingesting the document…',
                         accept: 'Recording the new schema version and ingesting the document…',
                         reset: 'Resetting the demo to its starting point — about half a minute.'}[job.kind] || 'Working…';
+        if (job.running && job.kind === 'reset') {
+          return `<div class="card" style="text-align:center;padding:48px 24px;border:2px solid #fcd34d;background:#fffbeb">
+              <div style="font-size:40px;margin-bottom:6px">↺</div>
+              <div style="font-size:22px;font-weight:800;color:var(--ink)"><span class="spin"></span> Reset is running</div>
+              <div style="font-size:14px;color:var(--slate2);margin-top:8px;line-height:1.6">Clearing today's intake and everything it produced · re-recording the open-market schema (v1) ·
+                registering the eight documents as received. The contracts loaded earlier are kept.</div>
+              <div style="font-size:13px;color:var(--mut);margin-top:14px">About 45 seconds — <b id="mrcResetSecs">0</b> s so far. This page returns to Intake by itself when it finishes.</div>
+            </div>
+            <script>
+              var t0 = Date.now();
+              window.__mrcPoll = setInterval(async function(){
+                if ((window.location.hash||'').indexOf('#mrc_inbox') !== 0) { clearInterval(window.__mrcPoll); window.__mrcPoll = null; return; }
+                var el = document.getElementById('mrcResetSecs'); if (el) { el.textContent = Math.round((Date.now() - t0) / 1000); }
+                var d; try { d = await (await fetch('/api/mrc/progress')).json(); } catch(e) { return; }
+                if (!d.running) { clearInterval(window.__mrcPoll); window.__mrcPoll = null; render(); if (!d.error) { toast('Reset finished — eight documents received, ready for Run intake'); } }
+              }, 1000);
+            <\/script>`;
+        }
         return `
           <details class="details-summary" open><summary>What am I seeing?</summary>
             <div class="body">Every document that has arrived. Each one is matched against the schema repository by its fingerprint — the document title and its section headings. A match with every expected field lands automatically; a match with changed or missing fields is flagged for review; an MRC with no matching schema goes to schema recognition; anything that is not an MRC is held for a person.</div>
@@ -426,9 +445,9 @@
               });
             });
             document.getElementById('mrcResetBtn').addEventListener('click', async function(){
-              var c = await confirm('Reset the MRC demo to its starting point? This clears every schema except the pre-registered open-market one, all processed contracts, checks, decisions and the audit trail for this flow, and marks all eight documents as received again.');
+              var c = await confirm('Reset the MRC demo to its starting point? This clears the intake of today (the eight documents and every contract, check, decision, agent review and audit event they produced) and every schema except the open-market one. The contracts loaded earlier are kept. Takes about 45 seconds.');
               if(!c.confirmed){ return; }
-              try{ await fetchJSON('/api/mrc/reset',{method:'POST',body:{}}); toast('Resetting the demo…'); setTimeout(function(){ render(); }, 1200); }
+              try{ await fetchJSON('/api/mrc/reset',{method:'POST',body:{}}); render(); }
               catch(e){ toast('Could not reset: '+e.message); }
             });
             if (${busy ? 'true' : 'false'}) {
@@ -2094,6 +2113,7 @@
         <a href="#home" class="nav-back">← All flows</a>
         <div class="nav-flow"><span class="nav-flow-ic">${fl.icon}</span>
           <div><div class="nav-flow-t">${escapeHtml(fl.label)}</div><div class="nav-flow-s">${escapeHtml(fl.sub || '')}</div></div></div>
+        ${counts.running ? `<a href="#mrc_inbox" class="nav-run"><span class="spin"></span> ${escapeHtml(({reset: 'Reset', intake: 'Intake', accept: 'Recording v2', recognise: 'Recording the schema'})[counts.running] || 'A step')} is running…</a>` : ''}
         <div class="nav-steps">
         ${steps.map((item, i) => `
           <a href="#${item.id}" class="nav-step ${isOn(item) ? 'on' : ''}">
@@ -2109,8 +2129,13 @@
         window.__navCountsAt = Date.now();
         fetch('/api/mrc/progress').then(r => r.json()).then(p => {
           const st = p.states || {};
-          const next = {intake: (st.received || 0) + (st.unrecognised || 0), schemas: (st.new_schema || 0) + (st.schema_changed || 0)};
+          const next = {intake: (st.received || 0) + (st.unrecognised || 0), schemas: (st.new_schema || 0) + (st.schema_changed || 0),
+                        running: p.running ? (p.kind || 'step') : ''};
           if (JSON.stringify(next) !== JSON.stringify(window.__navCounts || {})) { window.__navCounts = next; renderNav(); }
+          // While a step runs, keep checking so the strip clears (and counts update) when it ends.
+          if (p.running && !window.__navRunPoll) {
+            window.__navRunPoll = setInterval(function(){ window.__navCountsAt = 0; renderNav(); }, 3000);
+          } else if (!p.running && window.__navRunPoll) { clearInterval(window.__navRunPoll); window.__navRunPoll = null; }
         }).catch(() => {});
       }
     }
